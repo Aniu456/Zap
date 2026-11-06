@@ -128,22 +128,39 @@ enum CaptureGeometry {
         return CGRect(x: x, y: y, width: width, height: height)
     }
 
-    /// Keeps the toolbar on screen, preferring the space under the selection.
+    /// Default toolbar spot: to the right of the selection, vertically centered.
+    /// If that side is off-screen, try the left, then below (right-aligned), then above.
     static func toolbarOrigin(selection: CGRect, toolbarSize: CGSize, bounds: CGRect, gap: CGFloat = 8) -> CGPoint {
-        var y = selection.minY - gap - toolbarSize.height
-        if y < bounds.minY + gap {
-            y = selection.maxY + gap
+        let minX = bounds.minX + gap
+        let maxX = bounds.maxX - gap - toolbarSize.width
+        var x = selection.maxX + gap
+        var y = selection.midY - toolbarSize.height / 2
+        let fitsRight = x >= minX && x <= maxX
+        if !fitsRight {
+            let left = selection.minX - gap - toolbarSize.width
+            if left >= minX {
+                x = left
+            } else {
+                x = selection.maxX - toolbarSize.width
+                y = selection.minY - gap - toolbarSize.height
+                if y < bounds.minY + gap {
+                    y = selection.maxY + gap
+                }
+            }
         }
-        if y + toolbarSize.height > bounds.maxY - gap {
-            y = bounds.maxY - toolbarSize.height - gap
-        }
-        var x = selection.minX
-        if x + toolbarSize.width > bounds.maxX - gap {
-            x = bounds.maxX - toolbarSize.width - gap
-        }
-        x = max(bounds.minX + gap, x)
-        y = max(bounds.minY + gap, y)
-        return CGPoint(x: x, y: y)
+        return clampedToolbarOrigin(CGPoint(x: x, y: y), toolbarSize: toolbarSize, bounds: bounds, gap: gap)
+    }
+
+    /// Pulls a dragged toolbar back on screen without moving it when it already fits.
+    static func clampedToolbarOrigin(_ origin: CGPoint, toolbarSize: CGSize, bounds: CGRect, gap: CGFloat = 8) -> CGPoint {
+        let minX = bounds.minX + gap
+        let minY = bounds.minY + gap
+        let maxX = max(minX, bounds.maxX - gap - toolbarSize.width)
+        let maxY = max(minY, bounds.maxY - gap - toolbarSize.height)
+        return CGPoint(
+            x: min(max(origin.x, minX), maxX),
+            y: min(max(origin.y, minY), maxY)
+        )
     }
 }
 

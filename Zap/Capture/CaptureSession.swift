@@ -628,12 +628,27 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
     }
 
     private func redraw() {
+        keepToolbarOnScreen()
         toolbar?.setTool(tool)
         toolbar?.setUndoEnabled(!undoStack.isEmpty)
         toolbar?.setRedoEnabled(!redoStack.isEmpty)
         for view in views.values {
             view.needsDisplay = true
             view.window?.invalidateCursorRects(for: view)
+        }
+    }
+
+    /// A dragged toolbar stays where the user put it. Only an origin that would
+    /// leave the screen is pulled back in.
+    private func keepToolbarOnScreen() {
+        guard let toolbar, let superview = toolbar.superview else { return }
+        let origin = CaptureGeometry.clampedToolbarOrigin(
+            toolbar.frame.origin,
+            toolbarSize: toolbar.frame.size,
+            bounds: superview.bounds
+        )
+        if origin != toolbar.frame.origin {
+            toolbar.frame.origin = origin
         }
     }
 
