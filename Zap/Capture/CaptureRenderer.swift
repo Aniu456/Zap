@@ -1,40 +1,46 @@
 import AppKit
+import ImageIO
 
 enum CaptureRenderer {
     static func render(base: CGImage, marks: [CaptureMark]) -> CGImage? {
+        if marks.isEmpty { return base }
         let width = base.width
         let height = base.height
-        guard width > 0, height > 0 else { return nil }
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
+        guard width > 0, height > 0, let context = makeContext(for: base) else { return nil }
 
-        // User space matches the annotation model: origin at the top-left, y downward.
+        // Draw in the context's default space first. Flipping the CTM and then
+        // drawing the screenshot turns the bitmap upside down, which is the jump
+        // people see when the overlay swaps to this image. Annotations use a
+        // top-left origin, so the flip happens only after the pixels are in place.
+        context.interpolationQuality = .none
+        context.draw(base, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        for mark in marks {
+            if case .mosaic(let rect) = mark {
+                pixelate(context: context, imageWidth: width, imageHeight: height, rect: rect)
+            }
+        }
+
+        context.saveGState()
         context.translateBy(x: 0, y: CGFloat(height))
         context.scaleBy(x: 1, y: -1)
-        context.interpolationQuality = .high
-        context.draw(base, in: CGRect(x: 0, y: 0, width: width, height: height))
-        context.saveGState()
         context.clip(to: CGRect(x: 0, y: 0, width: width, height: height))
+        context.interpolationQuality = .high
 
         let lineWidth = max(2, CGFloat(min(width, height)) / 240)
         let markColor = Self.markColor
         for mark in marks {
             switch mark {
-            case .mosaic(let rect):
-                pixelate(context: context, imageWidth: width, imageHeight: height, rect: rect)
+            case .mosaic:
+                break
             case .box(let rect):
                 strokeBox(rect, lineWidth: lineWidth, color: markColor, in: context)
             case .arrow(let from, let to):
                 strokeArrow(from: from, to: to, lineWidth: lineWidth, color: markColor, in: context)
             case .text(let string, let origin, let fontSize):
                 drawText(string, at: origin, fontSize: fontSize, color: markColor, in: context)
+            case .stroke(let points, let width, let alpha):
+                strokePath(points, width: width, alpha: alpha, in: context)
             }
         }
         context.restoreGState()
@@ -42,13 +48,45 @@ enum CaptureRenderer {
     }
 
     static func pngData(from image: CGImage) -> Data? {
-        let rep = NSBitmapImageRep(cgImage: image)
-        return rep.representation(using: .png, properties: [:])
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else {
+            return nil
+        }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return data as Data
+    }
+
+    private static func makeContext(for base: CGImage) -> CGContext? {
+        let width = base.width
+        let height = base.height
+        let colorSpace = base.colorSpace.flatMap { $0.model == .rgb ? $0 : nil } ?? CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+        if let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) {
+            return context
+        }
+        return CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: bitmapInfo
+        )
     }
 
     private static func pixelate(context: CGContext, imageWidth: Int, imageHeight: Int, rect: CGRect) {
-        let topLeft = CaptureGeometry.pixelRect(from: rect, imageWidth: imageWidth, imageHeight: imageHeight)
-        guard !topLeft.isEmpty, let data = context.data else { return }
+        let area = CaptureGeometry.pixelRect(from: rect, imageWidth: imageWidth, imageHeight: imageHeight)
+        guard !area.isEmpty, let data = context.data else { return }
         let bytesPerRow = context.bytesPerRow
         let count = bytesPerRow * imageHeight
         guard count > 0 else { return }
@@ -56,15 +94,14 @@ enum CaptureRenderer {
         pixels.withUnsafeMutableBytes { raw in
             raw.copyMemory(from: UnsafeRawBufferPointer(start: data, count: count))
         }
-        // The bitmap's first row is the bottom of the image, even though user space is flipped.
-        let bufferRect = CaptureGeometry.bottomUpRect(fromTopLeft: topLeft, imageHeight: imageHeight)
+        // The base image was drawn upright, so row 0 is the top. Mosaic rects use that origin.
         let block = max(8, min(imageWidth, imageHeight) / 80)
         MosaicBuffer.pixelate(
             pixels: &pixels,
             width: imageWidth,
             height: imageHeight,
             bytesPerRow: bytesPerRow,
-            rect: bufferRect,
+            rect: area,
             block: block
         )
         pixels.withUnsafeBytes { raw in
@@ -101,6 +138,20 @@ enum CaptureRenderer {
         context.addLine(to: head.1)
         context.closePath()
         context.fillPath()
+    }
+
+    private static func strokePath(_ points: [CGPoint], width: CGFloat, alpha: CGFloat, in context: CGContext) {
+        guard points.count >= 2 else { return }
+        context.setStrokeColor(red: 0.90, green: 0.15, blue: 0.18, alpha: alpha)
+        context.setLineWidth(max(1, width))
+        context.setLineCap(.round)
+        context.setLineJoin(.round)
+        context.beginPath()
+        context.move(to: points[0])
+        for point in points.dropFirst() {
+            context.addLine(to: point)
+        }
+        context.strokePath()
     }
 
     private static func drawText(_ string: String, at origin: CGPoint, fontSize: CGFloat, color: CGColor, in context: CGContext) {

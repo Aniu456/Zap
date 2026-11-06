@@ -8,7 +8,9 @@ final class CaptureWindow: NSWindow {
 struct CaptureCanvasState {
     var background: CGImage
     var selection: CGRect?
+    /// Mosaic-only composite of the crop. The selection hole itself always shows `background`.
     var preview: CGImage?
+    var marks: [CaptureMark]
     var draft: CaptureMark?
     var cropSize: CGSize?
     var hint: String
@@ -48,12 +50,25 @@ final class CaptureOverlayView: NSView {
         bounds.fill(using: .sourceOver)
 
         if let selection = state.selection, selection.width > 1, selection.height > 1 {
+            // Same pixels as the drag: the frozen full-screen image, clipped.
+            // A separately cropped and re-rendered preview shifts, flips, or recolors this hole.
             NSGraphicsContext.current?.saveGraphicsState()
             NSBezierPath(rect: selection).addClip()
-            if let preview = state.preview {
-                drawImage(preview, in: selection)
-            } else {
-                drawImage(state.background, in: bounds)
+            drawImage(state.background, in: bounds)
+            if let preview = state.preview, let cropSize = state.cropSize {
+                let previous = NSGraphicsContext.current?.imageInterpolation
+                NSGraphicsContext.current?.imageInterpolation = .none
+                for mark in state.marks {
+                    guard case .mosaic(let rect) = mark else { continue }
+                    let viewRect = Self.viewRect(fromPixelRect: rect, selection: selection, imageSize: cropSize)
+                    NSGraphicsContext.current?.saveGraphicsState()
+                    NSBezierPath(rect: viewRect).addClip()
+                    drawImage(preview, in: selection)
+                    NSGraphicsContext.current?.restoreGraphicsState()
+                }
+                if let previous {
+                    NSGraphicsContext.current?.imageInterpolation = previous
+                }
             }
             NSGraphicsContext.current?.restoreGraphicsState()
 
@@ -62,8 +77,13 @@ final class CaptureOverlayView: NSView {
             border.lineWidth = 1
             border.stroke()
 
-            if let draft = state.draft, let cropSize = state.cropSize {
-                drawDraft(draft, selection: selection, imageSize: cropSize)
+            if let cropSize = state.cropSize {
+                for mark in state.marks {
+                    drawMark(mark, selection: selection, imageSize: cropSize, drafting: false)
+                }
+                if let draft = state.draft {
+                    drawMark(draft, selection: selection, imageSize: cropSize, drafting: true)
+                }
             }
             drawSizeLabel(for: selection, preview: state.preview, cropSize: state.cropSize, background: state.background)
         }
@@ -95,12 +115,13 @@ final class CaptureOverlayView: NSView {
         )
     }
 
-    private func drawDraft(_ mark: CaptureMark, selection: CGRect, imageSize: CGSize) {
+    private func drawMark(_ mark: CaptureMark, selection: CGRect, imageSize: CGSize, drafting: Bool) {
+        let ink = NSColor(srgbRed: 0.90, green: 0.15, blue: 0.18, alpha: 1)
         switch mark {
         case .arrow(let from, let to):
             let start = CaptureGeometry.viewPoint(fromCropPixel: from, selection: selection, imageSize: imageSize)
             let end = CaptureGeometry.viewPoint(fromCropPixel: to, selection: selection, imageSize: imageSize)
-            NSColor.systemRed.setStroke()
+            ink.setStroke()
             let line = NSBezierPath()
             line.move(to: start)
             line.line(to: end)
@@ -113,22 +134,48 @@ final class CaptureOverlayView: NSView {
                 path.line(to: end)
                 path.line(to: head.1)
                 path.close()
-                NSColor.systemRed.setFill()
+                ink.setFill()
                 path.fill()
             }
-        case .box(let rect), .mosaic(let rect):
+        case .box(let rect):
             let viewRect = Self.viewRect(fromPixelRect: rect, selection: selection, imageSize: imageSize)
             let path = NSBezierPath(rect: viewRect)
             path.lineWidth = 2
-            if case .mosaic = mark {
-                path.setLineDash([5, 3], count: 2, phase: 0)
-                NSColor.white.setStroke()
-            } else {
-                NSColor.systemRed.setStroke()
-            }
+            ink.setStroke()
             path.stroke()
-        case .text:
-            break
+        case .mosaic(let rect):
+            guard drafting else { return }
+            let viewRect = Self.viewRect(fromPixelRect: rect, selection: selection, imageSize: imageSize)
+            let path = NSBezierPath(rect: viewRect)
+            path.lineWidth = 2
+            path.setLineDash([5, 3], count: 2, phase: 0)
+            NSColor.white.setStroke()
+            path.stroke()
+        case .text(let string, let origin, let fontSize):
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            let topLeft = CaptureGeometry.viewPoint(fromCropPixel: origin, selection: selection, imageSize: imageSize)
+            let pointSize = max(12, fontSize * selection.height / max(imageSize.height, 1))
+            let font = NSFont.systemFont(ofSize: pointSize, weight: .semibold)
+            let text = trimmed as NSString
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: ink
+            ]
+            text.draw(at: NSPoint(x: topLeft.x, y: topLeft.y - font.ascender), withAttributes: attributes)
+        case .stroke(let points, let width, let alpha):
+            guard points.count >= 2 else { return }
+            let path = NSBezierPath()
+            let first = CaptureGeometry.viewPoint(fromCropPixel: points[0], selection: selection, imageSize: imageSize)
+            path.move(to: first)
+            for point in points.dropFirst() {
+                path.line(to: CaptureGeometry.viewPoint(fromCropPixel: point, selection: selection, imageSize: imageSize))
+            }
+            path.lineWidth = max(1, width * selection.height / max(imageSize.height, 1))
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            ink.withAlphaComponent(alpha).setStroke()
+            path.stroke()
         }
     }
 

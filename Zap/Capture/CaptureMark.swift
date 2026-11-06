@@ -1,10 +1,13 @@
 import Foundation
 
 enum CaptureTool: Equatable {
-    case arrow
     case box
-    case text
+    case arrow
+    case pencil
+    case marker
     case mosaic
+    case text
+    case eraser
 }
 
 /// Marks are stored in crop-image pixels. Origin is the top-left, y grows downward.
@@ -13,4 +16,5 @@ enum CaptureMark: Equatable {
     case box(CGRect)
     case text(String, origin: CGPoint, fontSize: CGFloat)
     case mosaic(CGRect)
+    case stroke(points: [CGPoint], width: CGFloat, alpha: CGFloat)
 }

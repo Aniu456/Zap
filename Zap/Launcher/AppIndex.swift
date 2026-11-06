@@ -1,6 +1,6 @@
 import AppKit
 
-struct LaunchableApp: Identifiable, Hashable, Sendable {
+struct LaunchableApp: Identifiable, Hashable, Codable, Sendable {
     var id: String { path }
     let name: String
     let bundleName: String?
@@ -29,16 +29,26 @@ final class AppIndex: ObservableObject {
 
     private var lastScan = Date.distantPast
     private let recentKey = "zap.recentApps"
+    private var watchers: [DispatchSourceFileSystemObject] = []
+    private var rescanWork: DispatchWorkItem?
+    private var scanInFlight = false
 
     private init() {}
 
     func start() {
+        if let directory = AppIndexStore.supportDirectory(),
+           let cached = AppIndexStore.load(from: directory), !cached.isEmpty {
+            apps = cached
+        }
+        watchInstallLocations()
         rescan()
     }
 
+    /// Opening the launcher must not wait on a directory walk. A quiet rescan
+    /// runs only when the cache is missing or old; unchanged results are not published.
     func refreshIfStale() {
-        guard !isScanning else { return }
-        if apps.isEmpty || Date().timeIntervalSince(lastScan) > 30 {
+        guard !scanInFlight else { return }
+        if apps.isEmpty || Date().timeIntervalSince(lastScan) > 120 {
             rescan()
         }
     }
@@ -82,9 +92,21 @@ final class AppIndex: ObservableObject {
         }
     }
 
+    private func scheduleRescan() {
+        rescanWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.rescan()
+        }
+        rescanWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+    }
+
     private func rescan() {
-        guard !isScanning else { return }
-        isScanning = true
+        guard !scanInFlight else { return }
+        scanInFlight = true
+        if apps.isEmpty {
+            isScanning = true
+        }
         DispatchQueue.global(qos: .userInitiated).async {
             let found = AppScanner.scan()
             Task { @MainActor in
@@ -94,9 +116,58 @@ final class AppIndex: ObservableObject {
     }
 
     private func apply(_ found: [LaunchableApp]) {
-        apps = found
-        isScanning = false
+        scanInFlight = false
+        if isScanning {
+            isScanning = false
+        }
         lastScan = Date()
+        // A failed or empty walk must not replace a list the window is already showing.
+        if found.isEmpty && !apps.isEmpty { return }
+        guard !sameCatalog(found, apps) else { return }
+        apps = found
+        if let directory = AppIndexStore.supportDirectory() {
+            AppIndexStore.save(found, to: directory)
+        }
+    }
+
+    private func sameCatalog(_ lhs: [LaunchableApp], _ rhs: [LaunchableApp]) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+        for (left, right) in zip(lhs, rhs) {
+            if left.path != right.path || left.name != right.name
+                || left.bundleName != right.bundleName || left.bundleIdentifier != right.bundleIdentifier {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func watchInstallLocations() {
+        guard watchers.isEmpty else { return }
+        for root in AppScanner.rootURLs() {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+                continue
+            }
+            let fd = Darwin.open(root.path, O_EVTONLY)
+            guard fd >= 0 else { continue }
+            let source = DispatchSource.makeFileSystemObjectSource(
+                fileDescriptor: fd,
+                eventMask: [.write, .rename, .delete, .link],
+                queue: DispatchQueue.global(qos: .utility)
+            )
+            source.setEventHandler {
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        AppIndex.shared.scheduleRescan()
+                    }
+                }
+            }
+            source.setCancelHandler {
+                Darwin.close(fd)
+            }
+            source.resume()
+            watchers.append(source)
+        }
     }
 
     private func orderedForEmptyQuery() -> [LaunchableApp] {
@@ -122,15 +193,25 @@ final class AppIndex: ObservableObject {
 }
 
 enum AppScanner {
-    static func scan() -> [LaunchableApp] {
+    /// Directories that receive app installs. The index watches these so the
+    /// launcher can refresh without scanning on every open.
+    static func rootURLs() -> [URL] {
         let fileManager = FileManager.default
         var roots: [URL] = []
         roots.append(contentsOf: fileManager.urls(for: .applicationDirectory, in: .localDomainMask))
         roots.append(contentsOf: fileManager.urls(for: .applicationDirectory, in: .userDomainMask))
         roots.append(contentsOf: fileManager.urls(for: .applicationDirectory, in: .systemDomainMask))
+        roots.append(URL(fileURLWithPath: "/Applications", isDirectory: true))
+        roots.append(URL(fileURLWithPath: "/Applications/Utilities", isDirectory: true))
         roots.append(URL(fileURLWithPath: "/System/Applications", isDirectory: true))
         roots.append(URL(fileURLWithPath: "/System/Applications/Utilities", isDirectory: true))
-        roots.append(URL(fileURLWithPath: "/Applications/Utilities", isDirectory: true))
+        var seen = Set<String>()
+        return roots.filter { seen.insert($0.resolvingSymlinksInPath().path).inserted }
+    }
+
+    static func scan() -> [LaunchableApp] {
+        let fileManager = FileManager.default
+        var roots = rootURLs()
         roots.append(URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app"))
 
         var seen = Set<String>()

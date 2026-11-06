@@ -4,13 +4,18 @@ import AppKit
 /// `NSApplication.delegate` is weak, so this entry point retains the delegate.
 @main
 enum ZapMain {
-    private static let delegate = AppDelegate()
-
     static func main() {
-        let app = NSApplication.shared
-        app.setActivationPolicy(.accessory)
-        app.delegate = delegate
-        app.run()
+        // AppDelegate is main-actor isolated. Creating it here keeps the
+        // nonisolated entry point from calling that initializer directly.
+        // `app.run()` retains the local for the life of the process; the
+        // application only keeps a weak reference.
+        MainActor.assumeIsolated {
+            let app = NSApplication.shared
+            app.setActivationPolicy(.accessory)
+            let delegate = AppDelegate()
+            app.delegate = delegate
+            app.run()
+        }
     }
 }
 
@@ -32,6 +37,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ClipboardStore.shared.load()
         ClipboardMonitor.shared.start()
         statusItem = StatusItemController()
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        AccessibilityPermission.shared.refresh()
+        ScreenRecordingPermission.shared.refresh()
     }
 
     func applicationDidResignActive(_ notification: Notification) {

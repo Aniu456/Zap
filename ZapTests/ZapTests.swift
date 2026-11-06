@@ -38,6 +38,57 @@ final class FuzzyMatcherTests: XCTestCase {
         XCTAssertNotNil(partial)
         XCTAssertGreaterThan(exact!.score, partial!.score)
     }
+
+    func testNearbyTypoStillMatches() {
+        let typo = FuzzyMatcher.match(query: "Xocode", candidate: "Xcode")
+        let exact = FuzzyMatcher.match(query: "Xcode", candidate: "Xcode")
+        XCTAssertNotNil(typo)
+        XCTAssertNotNil(exact)
+        XCTAssertGreaterThan(exact!.score, typo!.score)
+        XCTAssertNotNil(FuzzyMatcher.match(query: "xocode", candidate: "Xcode"))
+        XCTAssertNotNil(FuzzyMatcher.match(query: "xo code", candidate: "Xcode"))
+        XCTAssertNotNil(FuzzyMatcher.match(query: "Xocde", candidate: "Xcode"))
+        XCTAssertNil(FuzzyMatcher.match(query: "Xocode", candidate: "Safari"))
+    }
+
+    func testTypoOfTheWholeNameOutranksALongerWindow() {
+        let direct = FuzzyMatcher.match(query: "Xocode", candidate: "Xcode")
+        let buried = FuzzyMatcher.match(query: "Xocode", candidate: "Xcode Beta Tools")
+        XCTAssertNotNil(direct)
+        XCTAssertNotNil(buried)
+        XCTAssertGreaterThan(direct!.score, buried!.score)
+    }
+
+    func testChineseSubstitution() {
+        XCTAssertNotNil(FuzzyMatcher.match(query: "微信开法", candidate: "微信开发"))
+        XCTAssertNil(FuzzyMatcher.match(query: "完全不同", candidate: "微信开发"))
+    }
+}
+
+final class AppIndexStoreTests: XCTestCase {
+    func testRoundTripKeepsNamesAndPaths() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("zap-index-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let apps = [
+            LaunchableApp(name: "Xcode", bundleName: "Xcode", path: "/Applications/Xcode.app", bundleIdentifier: "com.apple.dt.Xcode"),
+            LaunchableApp(name: "备忘录", bundleName: "Notes", path: "/System/Applications/Notes.app", bundleIdentifier: "com.apple.Notes")
+        ]
+        AppIndexStore.save(apps, to: directory)
+        XCTAssertEqual(AppIndexStore.load(from: directory), apps)
+    }
+
+    func testMissingOrForeignSnapshotIsIgnored() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("zap-index-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        XCTAssertNil(AppIndexStore.load(from: directory))
+        let url = directory.appendingPathComponent(AppIndexStore.fileName)
+        try Data("{\"version\":2,\"apps\":[]}".utf8).write(to: url)
+        XCTAssertNil(AppIndexStore.load(from: url.deletingLastPathComponent()))
+    }
 }
 
 final class ClipboardHistoryTests: XCTestCase {
