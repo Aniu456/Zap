@@ -35,13 +35,26 @@ final class HotkeyManager {
     }
 
     func registerAll() {
-        unregisterAll()
-        let settings = MainThread.run { SettingsStore.shared }
-        let launcherOK = register(settings.launcherHotkey, id: Self.launcherID)
-        let clipboardOK = register(settings.clipboardHotkey, id: Self.clipboardID)
-        MainThread.run {
-            SettingsStore.shared.noteRegistration(launcherOK: launcherOK, clipboardOK: clipboardOK)
+        let chords = currentChords()
+        let result = install(launcher: chords.launcher, clipboard: chords.clipboard)
+        MainActor.assumeIsolated {
+            SettingsStore.shared.noteRegistration(launcherOK: result.launcher, clipboardOK: result.clipboard)
         }
+    }
+
+    /// Copies the saved chords out of the main actor before Carbon registration.
+    private func currentChords() -> (launcher: HotkeyChord, clipboard: HotkeyChord) {
+        MainActor.assumeIsolated {
+            let settings = SettingsStore.shared
+            return (settings.launcherHotkey, settings.clipboardHotkey)
+        }
+    }
+
+    private func install(launcher: HotkeyChord, clipboard: HotkeyChord) -> (launcher: Bool, clipboard: Bool) {
+        unregisterAll()
+        let launcherOK = register(launcher, id: Self.launcherID)
+        let clipboardOK = register(clipboard, id: Self.clipboardID)
+        return (launcherOK, clipboardOK)
     }
 
     private func installHandler() {
@@ -76,15 +89,26 @@ final class HotkeyManager {
     }
 
     private func handle(id: UInt32) {
-        MainThread.run {
-            switch id {
-            case HotkeyManager.launcherID:
-                PaletteController.shared.toggle(.launcher)
-            case HotkeyManager.clipboardID:
-                PaletteController.shared.toggle(.clipboard)
-            default:
-                break
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                HotkeyManager.perform(id)
             }
+        } else {
+            Task { @MainActor in
+                HotkeyManager.perform(id)
+            }
+        }
+    }
+
+    @MainActor
+    private static func perform(_ id: UInt32) {
+        switch id {
+        case launcherID:
+            PaletteController.shared.toggle(.launcher)
+        case clipboardID:
+            PaletteController.shared.toggle(.clipboard)
+        default:
+            break
         }
     }
 

@@ -1,6 +1,6 @@
 import AppKit
 
-struct LaunchableApp: Identifiable, Hashable {
+struct LaunchableApp: Identifiable, Hashable, Sendable {
     var id: String { path }
     let name: String
     let bundleName: String?
@@ -69,12 +69,14 @@ final class AppIndex: ObservableObject {
     func launch(_ app: LaunchableApp) {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
+        let launched = app
         NSWorkspace.shared.openApplication(at: app.url, configuration: configuration) { _, error in
-            MainThread.run {
-                if error != nil {
+            let failed = error != nil
+            Task { @MainActor in
+                if failed {
                     ToastCenter.shared.show(L10n.launchFailed)
                 } else {
-                    AppIndex.shared.remember(app)
+                    AppIndex.shared.remember(launched)
                 }
             }
         }
@@ -85,10 +87,8 @@ final class AppIndex: ObservableObject {
         isScanning = true
         DispatchQueue.global(qos: .userInitiated).async {
             let found = AppScanner.scan()
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    AppIndex.shared.apply(found)
-                }
+            Task { @MainActor in
+                AppIndex.shared.apply(found)
             }
         }
     }

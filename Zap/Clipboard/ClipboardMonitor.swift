@@ -14,7 +14,7 @@ final class ClipboardMonitor {
     func start() {
         guard timer == nil else { return }
         let timer = Timer(timeInterval: 0.4, repeats: true) { _ in
-            MainThread.run {
+            MainActor.assumeIsolated {
                 ClipboardMonitor.shared.poll()
             }
         }

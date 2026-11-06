@@ -43,9 +43,15 @@ final class PaletteController: ObservableObject {
         isPresented = true
         NSApp.activate()
         panel.orderFrontRegardless()
-        panel.makeKey()
         installKeyMonitor()
         AppIndex.shared.refreshIfStale()
+        // makeKey on the same turn as installing the hosting view throws on newer AppKit.
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                guard PaletteController.shared.isPresented else { return }
+                PaletteController.shared.panel?.makeKey()
+            }
+        }
     }
 
     /// Esc, or the same hotkey again. Returns focus to the app the user was in.
@@ -131,8 +137,6 @@ final class PaletteController: ObservableObject {
             rootView: PaletteView()
                 .environment(\.locale, Locale(identifier: "zh-Hans-SG"))
         )
-        host.wantsLayer = true
-        host.layer?.backgroundColor = NSColor.clear.cgColor
         panel.contentView = host
         self.panel = panel
         return panel
@@ -152,35 +156,39 @@ final class PaletteController: ObservableObject {
     private func installKeyMonitor() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            MainThread.run {
-                PaletteController.shared.handleKey(event)
+            let code = event.keyCode
+            let modifiers = event.modifierFlags.rawValue
+            let consumed = MainActor.assumeIsolated {
+                PaletteController.shared.handleKey(code: code, modifierRaw: modifiers)
             }
+            return consumed ? nil : event
         }
     }
 
-    private func handleKey(_ event: NSEvent) -> NSEvent? {
-        guard isPresented else { return event }
-        // Let an in-progress IME composition (Pinyin, etc.) keep arrows and Return.
-        if let text = panel?.firstResponder as? NSText, text.hasMarkedText() {
-            return event
+    /// Returns true when the palette consumed the key. The event itself stays outside the actor.
+    private func handleKey(code: UInt16, modifierRaw: UInt) -> Bool {
+        guard isPresented else { return false }
+        // NSText no longer exposes composition state. The field editor is an NSTextInputClient.
+        if let client = panel?.firstResponder as? any NSTextInputClient, client.hasMarkedText() {
+            return false
         }
-        let blocked = event.modifierFlags.intersection([.command, .option, .control])
-        if !blocked.isEmpty { return event }
-        switch event.keyCode {
-        case UInt16(kVK_UpArrow):
+        let flags = NSEvent.ModifierFlags(rawValue: modifierRaw).intersection([.command, .option, .control, .shift])
+        if !flags.intersection([.command, .option, .control]).isEmpty { return false }
+        switch Int(code) {
+        case kVK_UpArrow:
             moveSelection(-1)
-            return nil
-        case UInt16(kVK_DownArrow):
+            return true
+        case kVK_DownArrow:
             moveSelection(1)
-            return nil
-        case UInt16(kVK_Return), UInt16(kVK_ANSI_KeypadEnter):
+            return true
+        case kVK_Return, kVK_ANSI_KeypadEnter:
             commitSelection()
-            return nil
-        case UInt16(kVK_Escape):
+            return true
+        case kVK_Escape:
             dismiss()
-            return nil
+            return true
         default:
-            return event
+            return false
         }
     }
 
@@ -199,7 +207,7 @@ final class PalettePanel: NSPanel {
     init() {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
-            styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )

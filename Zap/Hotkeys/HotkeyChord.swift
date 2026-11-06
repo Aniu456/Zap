@@ -1,7 +1,7 @@
 import AppKit
 import Carbon
 
-struct HotkeyChord: Codable, Equatable, Hashable {
+struct HotkeyChord: Codable, Equatable, Hashable, Sendable {
     var keyCode: UInt16
     /// Raw value of the device-independent modifier flags that matter: command, option, shift, control.
     var modifiers: UInt
