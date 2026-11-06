@@ -77,6 +77,10 @@ dist/
 # Swift Package Manager
 .swiftpm/
 
+# Python
+__pycache__/
+*.pyc
+
 # Sparkle EdDSA private keys. Never commit these.
 sparkle_private_key
 sparkle_private_key.txt
