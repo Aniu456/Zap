@@ -84,27 +84,51 @@ final class CaptureGeometryTests: XCTestCase {
         XCTAssertEqual(flipped, CaptureGeometry.PixelRect(x: 2, y: 70, width: 4, height: 20))
     }
 
-    func testToolbarPrefersTheSpaceBelowAndStaysOnScreen() {
-        let below = CaptureGeometry.toolbarOrigin(
+    func testToolbarDefaultsToTheRightOfTheSelection() {
+        let origin = CaptureGeometry.toolbarOrigin(
             selection: CGRect(x: 20, y: 80, width: 100, height: 40),
             toolbarSize: CGSize(width: 120, height: 44),
             bounds: CGRect(x: 0, y: 0, width: 400, height: 300)
         )
-        XCTAssertEqual(below, CGPoint(x: 20, y: 28))
+        XCTAssertEqual(origin, CGPoint(x: 128, y: 78))
+    }
+
+    func testToolbarUsesTheLeftWhenTheRightIsOffScreen() {
+        let origin = CaptureGeometry.toolbarOrigin(
+            selection: CGRect(x: 300, y: 80, width: 80, height: 40),
+            toolbarSize: CGSize(width: 120, height: 44),
+            bounds: CGRect(x: 0, y: 0, width: 400, height: 300)
+        )
+        XCTAssertEqual(origin.x, 172, accuracy: 0.001)
+        XCTAssertEqual(origin.y, 78, accuracy: 0.001)
+        XCTAssertLessThan(origin.x, 300)
+    }
+
+    func testToolbarDropsBelowWhenNeitherSideFits() {
+        let below = CaptureGeometry.toolbarOrigin(
+            selection: CGRect(x: 10, y: 100, width: 370, height: 40),
+            toolbarSize: CGSize(width: 120, height: 44),
+            bounds: CGRect(x: 0, y: 0, width: 400, height: 300)
+        )
+        XCTAssertEqual(below, CGPoint(x: 260, y: 48))
 
         let above = CaptureGeometry.toolbarOrigin(
-            selection: CGRect(x: 20, y: 4, width: 100, height: 40),
+            selection: CGRect(x: 10, y: 4, width: 370, height: 40),
             toolbarSize: CGSize(width: 120, height: 44),
             bounds: CGRect(x: 0, y: 0, width: 400, height: 300)
         )
         XCTAssertEqual(above.y, 52, accuracy: 0.001)
+        XCTAssertGreaterThan(above.x, 10)
+    }
 
-        let shifted = CaptureGeometry.toolbarOrigin(
-            selection: CGRect(x: 360, y: 80, width: 30, height: 40),
-            toolbarSize: CGSize(width: 120, height: 44),
-            bounds: CGRect(x: 0, y: 0, width: 400, height: 300)
-        )
-        XCTAssertLessThanOrEqual(shifted.x + 120, 392)
+    func testDraggedToolbarStaysPutUntilItWouldLeaveTheScreen() {
+        let size = CGSize(width: 120, height: 44)
+        let bounds = CGRect(x: 0, y: 0, width: 400, height: 300)
+        let parked = CaptureGeometry.clampedToolbarOrigin(CGPoint(x: 40, y: 40), toolbarSize: size, bounds: bounds)
+        XCTAssertEqual(parked, CGPoint(x: 40, y: 40))
+
+        let clipped = CaptureGeometry.clampedToolbarOrigin(CGPoint(x: -40, y: 500), toolbarSize: size, bounds: bounds)
+        XCTAssertEqual(clipped, CGPoint(x: 8, y: 248))
     }
 
     func testCropViewRectLinesUpWithAnAlignedSelection() {

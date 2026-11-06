@@ -1,7 +1,7 @@
 import AppKit
 
-/// Icon toolbar modeled on Snipaste's Mac annotation bar: a light rounded pill
-/// under the selection, symbols only, tools on the left and actions on the right.
+/// Icon toolbar modeled on Snipaste's Mac annotation bar: a light rounded pill,
+/// symbols only, tools on the left and actions on the right. Drag the bar to move it.
 final class CaptureToolbar: NSView {
     var onTool: ((CaptureTool) -> Void)?
     var onUndo: (() -> Void)?
@@ -15,6 +15,10 @@ final class CaptureToolbar: NSView {
     private var undoButton: NSButton?
     private var redoButton: NSButton?
     private let colorDot = IgnoredHitView()
+    private var dragGrab: CGPoint?
+    private var dragMoved = false
+    private var pressedButton: NSButton?
+    private let gripWidth: CGFloat = 16
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -37,6 +41,86 @@ final class CaptureToolbar: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // Clicks anywhere on the bar come here, so a drag can move it and a
+        // tap can still fire the button underneath.
+        super.hitTest(point) == nil ? nil : self
+    }
+
+    override func resetCursorRects() {
+        discardCursorRects()
+        addCursorRect(NSRect(x: 0, y: 0, width: gripWidth, height: bounds.height), cursor: .openHand)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let ink = NSColor.black.withAlphaComponent(0.38)
+        ink.setFill()
+        let center = CGPoint(x: gripWidth / 2, y: bounds.midY)
+        for row in -1...1 {
+            for column in [-1, 1] {
+                let rect = NSRect(
+                    x: center.x + CGFloat(column) * 1.7 - 1,
+                    y: center.y + CGFloat(row) * 3.4 - 1,
+                    width: 2,
+                    height: 2
+                )
+                NSBezierPath(ovalIn: rect).fill()
+            }
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let superview else { return }
+        let local = convert(event.locationInWindow, from: nil)
+        let point = superview.convert(event.locationInWindow, from: nil)
+        dragGrab = CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
+        dragMoved = false
+        if let button = button(at: local), button.isEnabled {
+            pressedButton = button
+            button.highlight(true)
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let dragGrab, let superview else { return }
+        let point = superview.convert(event.locationInWindow, from: nil)
+        let proposed = CGPoint(x: point.x - dragGrab.x, y: point.y - dragGrab.y)
+        if !dragMoved, hypot(proposed.x - frame.minX, proposed.y - frame.minY) < 3 {
+            return
+        }
+        if !dragMoved {
+            dragMoved = true
+            pressedButton?.highlight(false)
+            pressedButton = nil
+            NSCursor.closedHand.push()
+        }
+        frame.origin = CaptureGeometry.clampedToolbarOrigin(
+            proposed,
+            toolbarSize: frame.size,
+            bounds: superview.bounds
+        )
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let button = pressedButton
+        pressedButton = nil
+        button?.highlight(false)
+        if dragMoved {
+            NSCursor.closedHand.pop()
+        } else if let button, button.isEnabled {
+            button.performClick(nil)
+        }
+        dragGrab = nil
+        dragMoved = false
+    }
+
+    private func button(at local: CGPoint) -> NSButton? {
+        for case let button as NSButton in subviews.reversed() where button.frame.contains(local) {
+            return button
+        }
+        return nil
     }
 
     func setTool(_ tool: CaptureTool) {
@@ -62,7 +146,7 @@ final class CaptureToolbar: NSView {
     private func build() {
         let height: CGFloat = 36
         let buttonSide: CGFloat = 26
-        var x: CGFloat = 6
+        var x = gripWidth
         let y = (height - buttonSide) / 2
 
         func place(_ button: NSButton) {
@@ -111,7 +195,7 @@ final class CaptureToolbar: NSView {
     }
 
     private func addSeparator(x: CGFloat, height: CGFloat) {
-        let line = NSView(frame: NSRect(x: x, y: (height - 16) / 2, width: 1, height: 16))
+        let line = IgnoredHitView(frame: NSRect(x: x, y: (height - 16) / 2, width: 1, height: 16))
         line.wantsLayer = true
         line.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.16).cgColor
         addSubview(line)
