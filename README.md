@@ -12,6 +12,8 @@
 
 仓库：<https://github.com/Aniu456/Zap>
 
+参考了哪些公开项目、地址在哪，写在下面的[来源说明](#来源说明)。那一节用来核对许可，避免许可和开源社区上的纠纷。
+
 英文名是 Zap，界面是简体中文，面向 zh-Hans-SG。
 
 ## 环境
@@ -208,27 +210,90 @@ git push origin v1.0.0
 
 不要把 tag 强推到已经发出去的版本上。用户手里的包按构建号判断新旧。
 
-## 参考与致谢
+## 来源说明
 
-下面每一项都写明了许可，以及当前仓库实际用了什么。一闪的 Swift 和 Objective-C 源码是为本项目写的。树里没有 vendored 第三方源码目录，源文件里也没有这些项目的版权头。
+这一节说明一闪参考了哪些公开项目，以及每个项目的地址。地址写在这里，是为了让任何人都能打开原件、核对许可，避免法律和开源社区上的纠纷。
 
-| 项目 | 许可 | 地址 | 当前仓库里的关系 |
-| --- | --- | --- | --- |
-| [Raycast](https://www.raycast.com) | 专有软件 | <https://www.raycast.com> | 产品范围上的参考，只涉及启动器和剪贴板。一闪有自己的界面和实现。 |
-| [Snipaste](https://www.snipaste.com) | 专有软件 | <https://www.snipaste.com> | 截图体验上的参考：框选区域、标注、贴在屏幕上。一闪的工具栏是自己的文字按钮，出现在选区下方。 |
-| [capcap](https://github.com/realskyrin/capcap) | MIT，Copyright (c) 2026 realskyrin | [提交 3696064](https://github.com/realskyrin/capcap/tree/3696064b56330b23b40f4b9dfe19b693437ccb84) | 截图和应用外壳的既有实现，讨论时那一版 Info.plist 约为 1.7.23。当前树没有纳入 capcap 的源码，也没有 PermissionFlow 或 SystemSettingsKit。 |
-| [Maccy](https://github.com/p0deje/Maccy) | MIT，Copyright (c) 2025 Alex Rodionov | <https://github.com/p0deje/Maccy> | 剪贴板历史的行为参考：跳过机密类型，把选中的内容贴回前台应用。参考了行为，未复制其代码。 |
-| [Buffer](https://github.com/samirpatil2000/Buffer) | MIT，Copyright (c) 2026 Samir Patil | [提交 a1e3a17](https://github.com/samirpatil2000/Buffer/tree/a1e3a1762fe8308a252c8959e3eaafd94f7cc056) | 剪贴板界面的参考，看过搜索框、列表行和预览。参考了界面，未复制其代码。 |
-| [tinycast](https://github.com/abue-ammar/tinycast) | AGPL-3.0，Copyright (C) 2026 Abue Ammar | <https://github.com/abue-ammar/tinycast> | 只参考启动器的交互：快捷键呼出、立刻可以输入、方向键选择、回车打开、Esc 退出。一闪的启动器是自己的代码，没有复制 tinycast。 |
-| [Snapzy](https://github.com/duongductrong/Snapzy) | BSD-3-Clause，Copyright (c) 2026, Trong Duong Duc | <https://github.com/duongductrong/Snapzy> | 可以用来对照截图功能清单。当前树没有复用它的代码，所以没有附带它的版权声明。以后如果真的复用，必须保留上游的 BSD-3-Clause 声明。 |
-| [macshot](https://github.com/sw33tLie/macshot) | GPL-3.0 | <https://github.com/sw33tLie/macshot> | 代码不得复制。当前树里没有它的源码。 |
-| [Deck](https://github.com/yuzeguitarist/Deck) | `deckclip/` 为 AGPL-3.0-only；其余文件保留所有权利 | <https://github.com/yuzeguitarist/Deck> | 代码不得复制。当前树里没有它的源码。 |
-| [OneClip](https://github.com/One-Clip/OneClip) | 仓库中早期源码为 MIT；现行完整应用是商业软件 | <https://github.com/One-Clip/OneClip> | 代码不得复制。当前树里没有它的源码。 |
-| [Sparkle](https://github.com/sparkle-project/Sparkle) | MIT。版权人见 [ThirdParty/Sparkle/LICENSE](ThirdParty/Sparkle/LICENSE) | 2.10.1，<https://github.com/sparkle-project/Sparkle> | 实际链接的依赖，用来检查更新。许可全文放在 `ThirdParty/Sparkle/`。 |
+一闪自己的地址是 <https://github.com/Aniu456/Zap>。许可证是 MIT，Copyright (c) 2026 Benny，全文见 [LICENSE](LICENSE)。
 
-tinycast、macshot、Deck、OneClip 这四个名字只作为不能复制的既有作品记在这里。核对过当前树的源文件、注释和目录，没有它们的代码。
+每个项目给两个地址。仓库地址是上游主页。对照地址固定到一次提交，相当于把参考的那一版单独指出来：对方以后继续改默认分支，这里仍能打开当时看到的树。capcap 和 Buffer 用的是讨论时指定的提交。其余 GitHub 项目没有指定提交，对照地址是写这份说明时（2026-11-07，新加坡时间）默认分支上的提交。Raycast 和 Snipaste 没有公开的源码仓库，只记产品网站。
 
-capcap、Maccy、Buffer、Snapzy 同样没有被复制进这棵树。表里写的是参考了哪些行为和界面。Sparkle 是唯一打进应用的第三方代码，通过 Swift Package Manager 拉取 2.10.1 的二进制框架，源码不在本仓库里。
+本仓库的应用源码是为一闪编写的。下面除 Sparkle 以外，都是参考其公开的产品、交互、行为或界面；那些提交里的源文件没有放进本仓库。tinycast、macshot、Deck、OneClip 的代码不复制。Sparkle 是实际链接的依赖，许可全文随仓库放在 [ThirdParty/Sparkle/LICENSE](ThirdParty/Sparkle/LICENSE)。同一份名单也写在 [NOTICE](NOTICE)，方便随源码一起分发。
+
+### Raycast
+
+- 仓库地址：没有公开源码仓库。产品网站 <https://www.raycast.com>
+- 许可：专有软件
+- 说明：产品范围上的参考，限于启动器和剪贴板。一闪有自己的界面和实现。
+
+### Snipaste
+
+- 仓库地址：没有公开源码仓库。产品网站 <https://www.snipaste.com>
+- 许可：专有软件
+- 说明：截图体验上的参考，包括框选区域、标注、贴在屏幕上。一闪的工具栏是自己的文字按钮，出现在选区下方。
+
+### capcap
+
+- 仓库地址：<https://github.com/realskyrin/capcap>
+- 对照地址：<https://github.com/realskyrin/capcap/tree/3696064b56330b23b40f4b9dfe19b693437ccb84>
+- 许可：MIT，Copyright (c) 2026 realskyrin。<https://github.com/realskyrin/capcap/blob/3696064b56330b23b40f4b9dfe19b693437ccb84/LICENSE>
+- 说明：参考了这一版的截图和应用外壳。该提交的 Info.plist 约为 1.7.23。本仓库没有放入 capcap 的源码，也没有放入 PermissionFlow 或 SystemSettingsKit。
+
+### Maccy
+
+- 仓库地址：<https://github.com/p0deje/Maccy>
+- 对照地址：<https://github.com/p0deje/Maccy/tree/f0b571e32e4031d7b91ba811f50d0f33e8e5548b>
+- 许可：MIT，Copyright (c) 2025 Alex Rodionov。<https://github.com/p0deje/Maccy/blob/f0b571e32e4031d7b91ba811f50d0f33e8e5548b/LICENSE>
+- 说明：参考了剪贴板历史的行为，包括跳过机密类型，以及把选中内容贴回前台应用。对照过的实现说明见 <https://github.com/p0deje/Maccy/blob/f0b571e32e4031d7b91ba811f50d0f33e8e5548b/Maccy/Clipboard.swift>。参考了行为，该文件的代码没有进入本仓库。
+
+### Buffer
+
+- 仓库地址：<https://github.com/samirpatil2000/Buffer>
+- 对照地址：<https://github.com/samirpatil2000/Buffer/tree/a1e3a1762fe8308a252c8959e3eaafd94f7cc056>
+- 许可：MIT，Copyright (c) 2026 Samir Patil。<https://github.com/samirpatil2000/Buffer/blob/a1e3a1762fe8308a252c8959e3eaafd94f7cc056/LICENSE>
+- 说明：只参考这一提交的剪贴板界面，包括搜索框、列表行和预览。界面目录：<https://github.com/samirpatil2000/Buffer/tree/a1e3a1762fe8308a252c8959e3eaafd94f7cc056/Views>。参考了界面，这些文件的代码没有进入本仓库。
+
+### tinycast
+
+- 仓库地址：<https://github.com/abue-ammar/tinycast>
+- 对照地址：<https://github.com/abue-ammar/tinycast/tree/9df93751eb7fa9b56a1f0f8d0559ad4f063d272b>
+- 许可：AGPL-3.0，Copyright (C) 2026 Abue Ammar。<https://github.com/abue-ammar/tinycast/blob/9df93751eb7fa9b56a1f0f8d0559ad4f063d272b/LICENSE>
+- 说明：只参考启动器的交互：快捷键呼出、立刻可以输入、方向键选择、回车打开、Esc 退出。一闪的启动器是自己的代码。tinycast 的代码没有复制，也没有放进本仓库。
+
+### Snapzy
+
+- 仓库地址：<https://github.com/duongductrong/Snapzy>
+- 对照地址：<https://github.com/duongductrong/Snapzy/tree/77d3d3feb7f46d1909dce8824f3b35d5709378a2>
+- 许可：BSD-3-Clause，Copyright (c) 2026, Trong Duong Duc。<https://github.com/duongductrong/Snapzy/blob/77d3d3feb7f46d1909dce8824f3b35d5709378a2/LICENSE>
+- 说明：用来对照截图功能清单。本仓库没有使用它的代码，因此没有附带它的版权声明。以后如果使用，必须保留上游的 BSD-3-Clause 声明，并在这里补上用了哪些文件。
+
+### macshot
+
+- 仓库地址：<https://github.com/sw33tLie/macshot>
+- 对照地址：<https://github.com/sw33tLie/macshot/tree/ec1b4e9b4b94788cd07a5ba1ced4161d772c8c4c>
+- 许可：GPL-3.0。<https://github.com/sw33tLie/macshot/blob/ec1b4e9b4b94788cd07a5ba1ced4161d772c8c4c/LICENSE>
+- 说明：只登记地址。它的代码不复制，本仓库里没有它的源码。
+
+### Deck
+
+- 仓库地址：<https://github.com/yuzeguitarist/Deck>
+- 对照地址：<https://github.com/yuzeguitarist/Deck/tree/34d3e0d305d789dd85f5a0b73302b51779f6f3cd>
+- 许可：`deckclip/` 为 AGPL-3.0-only；其余文件保留所有权利。见该提交的 LICENSE。
+- 说明：只登记地址。它的代码不复制，本仓库里没有它的源码。
+
+### OneClip
+
+- 仓库地址：<https://github.com/One-Clip/OneClip>
+- 对照地址：<https://github.com/One-Clip/OneClip/tree/65926e371b7f2b8001b45191265381ddf9066484>
+- 许可：该仓库标为 MIT。作者说明其中早期源码开源，现行完整应用是商业软件。见 <https://github.com/One-Clip/OneClip>
+- 说明：只登记地址。它的代码不复制，本仓库里没有它的源码。
+
+### Sparkle
+
+- 仓库地址：<https://github.com/sparkle-project/Sparkle>
+- 对照地址：<https://github.com/sparkle-project/Sparkle/tree/2.10.1>（提交 `ab7d71291238df6e0492143b120c9b696a35f603`）
+- 许可：MIT。版权人见 <https://github.com/sparkle-project/Sparkle/blob/2.10.1/LICENSE>，同一份文本在 [ThirdParty/Sparkle/LICENSE](ThirdParty/Sparkle/LICENSE)。
+- 说明：这是本仓库实际链接的第三方代码，版本 2.10.1，通过 Swift Package Manager 拉取二进制框架，用于「检查更新…」。Sparkle 的源码树没有整份放进本仓库。随一闪分发时保留上述许可。
 
 ## 工程
 
@@ -251,5 +316,7 @@ ThirdParty/Sparkle     Sparkle 的许可文本
 ## 许可
 
 一闪本身是 MIT，Copyright (c) 2026 Benny，见 [LICENSE](LICENSE)。
+
+参考项目的上游地址和固定提交写在[来源说明](#来源说明)，并复制在 [NOTICE](NOTICE)。随源码分发时保留 LICENSE 和 NOTICE。
 
 Sparkle 的 MIT 许可和它带上的其他声明见 [ThirdParty/Sparkle/LICENSE](ThirdParty/Sparkle/LICENSE)。随二进制分发时要保留这份声明。
