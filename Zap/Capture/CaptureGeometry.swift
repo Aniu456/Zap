@@ -128,27 +128,15 @@ enum CaptureGeometry {
         return CGRect(x: x, y: y, width: width, height: height)
     }
 
-    /// Default toolbar spot: to the right of the selection, vertically centered.
-    /// If that side is off-screen, try the left, then below (right-aligned), then above.
+    /// Default toolbar spot: the bottom-right of the selection. The bar's right
+    /// edge lines up with the selection, and the selection's bottom edge runs
+    /// through the middle of the bar. Off-screen positions are only clamped in.
     static func toolbarOrigin(selection: CGRect, toolbarSize: CGSize, bounds: CGRect, gap: CGFloat = 8) -> CGPoint {
-        let minX = bounds.minX + gap
-        let maxX = bounds.maxX - gap - toolbarSize.width
-        var x = selection.maxX + gap
-        var y = selection.midY - toolbarSize.height / 2
-        let fitsRight = x >= minX && x <= maxX
-        if !fitsRight {
-            let left = selection.minX - gap - toolbarSize.width
-            if left >= minX {
-                x = left
-            } else {
-                x = selection.maxX - toolbarSize.width
-                y = selection.minY - gap - toolbarSize.height
-                if y < bounds.minY + gap {
-                    y = selection.maxY + gap
-                }
-            }
-        }
-        return clampedToolbarOrigin(CGPoint(x: x, y: y), toolbarSize: toolbarSize, bounds: bounds, gap: gap)
+        let origin = CGPoint(
+            x: selection.maxX - toolbarSize.width,
+            y: selection.minY - toolbarSize.height / 2
+        )
+        return clampedToolbarOrigin(origin, toolbarSize: toolbarSize, bounds: bounds, gap: gap)
     }
 
     /// Pulls a dragged toolbar back on screen without moving it when it already fits.

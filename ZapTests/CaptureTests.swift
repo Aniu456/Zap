@@ -84,41 +84,34 @@ final class CaptureGeometryTests: XCTestCase {
         XCTAssertEqual(flipped, CaptureGeometry.PixelRect(x: 2, y: 70, width: 4, height: 20))
     }
 
-    func testToolbarDefaultsToTheRightOfTheSelection() {
+    func testToolbarSitsOnTheBottomRightEdge() {
         let origin = CaptureGeometry.toolbarOrigin(
-            selection: CGRect(x: 20, y: 80, width: 100, height: 40),
+            selection: CGRect(x: 40, y: 100, width: 200, height: 80),
             toolbarSize: CGSize(width: 120, height: 44),
             bounds: CGRect(x: 0, y: 0, width: 400, height: 300)
         )
-        XCTAssertEqual(origin, CGPoint(x: 128, y: 78))
+        XCTAssertEqual(origin, CGPoint(x: 120, y: 78))
+        XCTAssertEqual(origin.x + 120, 240, accuracy: 0.001)
+        XCTAssertEqual(origin.y + 22, 100, accuracy: 0.001)
     }
 
-    func testToolbarUsesTheLeftWhenTheRightIsOffScreen() {
+    func testToolbarWiderThanTheSelectionStaysRightAligned() {
         let origin = CaptureGeometry.toolbarOrigin(
-            selection: CGRect(x: 300, y: 80, width: 80, height: 40),
+            selection: CGRect(x: 100, y: 100, width: 50, height: 40),
             toolbarSize: CGSize(width: 120, height: 44),
             bounds: CGRect(x: 0, y: 0, width: 400, height: 300)
         )
-        XCTAssertEqual(origin.x, 172, accuracy: 0.001)
-        XCTAssertEqual(origin.y, 78, accuracy: 0.001)
-        XCTAssertLessThan(origin.x, 300)
+        XCTAssertEqual(origin.x + 120, 150, accuracy: 0.001)
+        XCTAssertEqual(origin.y + 22, 100, accuracy: 0.001)
     }
 
-    func testToolbarDropsBelowWhenNeitherSideFits() {
-        let below = CaptureGeometry.toolbarOrigin(
-            selection: CGRect(x: 10, y: 100, width: 370, height: 40),
+    func testBottomRightToolbarIsPulledBackOntoTheScreen() {
+        let origin = CaptureGeometry.toolbarOrigin(
+            selection: CGRect(x: 40, y: 10, width: 200, height: 80),
             toolbarSize: CGSize(width: 120, height: 44),
             bounds: CGRect(x: 0, y: 0, width: 400, height: 300)
         )
-        XCTAssertEqual(below, CGPoint(x: 260, y: 48))
-
-        let above = CaptureGeometry.toolbarOrigin(
-            selection: CGRect(x: 10, y: 4, width: 370, height: 40),
-            toolbarSize: CGSize(width: 120, height: 44),
-            bounds: CGRect(x: 0, y: 0, width: 400, height: 300)
-        )
-        XCTAssertEqual(above.y, 52, accuracy: 0.001)
-        XCTAssertGreaterThan(above.x, 10)
+        XCTAssertEqual(origin, CGPoint(x: 120, y: 8))
     }
 
     func testDraggedToolbarStaysPutUntilItWouldLeaveTheScreen() {
