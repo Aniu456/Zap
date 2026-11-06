@@ -24,7 +24,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.removeAllItems()
         menu.addItem(shortcutItem(L10n.openLauncher, action: #selector(openLauncher), chord: SettingsStore.shared.launcherHotkey))
         menu.addItem(shortcutItem(L10n.openClipboard, action: #selector(openClipboard), chord: SettingsStore.shared.clipboardHotkey))
+        menu.addItem(shortcutItem(L10n.openCapture, action: #selector(openCapture), chord: SettingsStore.shared.captureHotkey))
         menu.addItem(.separator())
+
+        let recording = ScreenRecordingPermission.shared.isTrusted
+        let recordingItem = NSMenuItem(
+            title: recording ? L10n.screenRecordingGranted : L10n.screenRecordingMissing,
+            action: recording ? nil : #selector(openSettings),
+            keyEquivalent: ""
+        )
+        recordingItem.target = self
+        menu.addItem(recordingItem)
 
         let trusted = AccessibilityPermission.shared.isTrusted
         let permission = NSMenuItem(
@@ -64,6 +74,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func openClipboard() {
         PaletteController.shared.show(.clipboard)
+    }
+
+    @objc private func openCapture() {
+        CaptureController.shared.begin()
     }
 
     @objc private func openSettings() {

@@ -23,9 +23,9 @@ final class SettingsWindowController {
         )
         let window = NSWindow(contentViewController: host)
         window.title = L10n.settings.replacingOccurrences(of: "…", with: "")
-        window.styleMask = [.titled, .closable, .miniaturizable]
-        window.setContentSize(NSSize(width: 580, height: 640))
-        window.minSize = NSSize(width: 520, height: 480)
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.setContentSize(NSSize(width: 580, height: 760))
+        window.minSize = NSSize(width: 520, height: 560)
         window.isReleasedWhenClosed = false
         self.window = window
         return window

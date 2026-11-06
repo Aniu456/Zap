@@ -59,7 +59,24 @@ final class ClipboardStore: ObservableObject {
         apply(item)
     }
 
-    /// Public entry for a future capture feature, and for images already on the pasteboard.
+    /// Puts a capture on the system pasteboard and into history.
+    /// Returns false when the PNG is outside the history size limit; the pasteboard write still happens.
+    @discardableResult
+    func publishCapturedPNG(_ data: Data, caption: String) -> Bool {
+        let pasteboard = NSPasteboard.general
+        isApplyingPasteboard = true
+        pasteboard.clearContents()
+        if let image = NSImage(data: data) {
+            pasteboard.writeObjects([image])
+        }
+        pasteboard.setData(data, forType: .png)
+        ignoredChangeCounts.insert(pasteboard.changeCount)
+        isApplyingPasteboard = false
+        guard ClipboardPolicy.acceptsImageByteCount(data.count) else { return false }
+        recordImageData(data, caption: caption)
+        return true
+    }
+
     /// `data` must be PNG bytes.
     func recordImageData(_ data: Data, caption: String?) {
         guard ClipboardPolicy.acceptsImageByteCount(data.count) else { return }

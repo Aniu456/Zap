@@ -3,8 +3,6 @@ import Foundation
 
 /// Carbon hot keys swallow the chord, so Option-Space does not also type into the front app.
 ///
-/// A later capture feature should register another id. `CaptureFeature.reservedHotkeyID` (3)
-/// is held for that and is not registered in v1.
 final class HotkeyManager {
     static let shared = HotkeyManager()
 
@@ -39,8 +37,13 @@ final class HotkeyManager {
         let settings = MainThread.run { SettingsStore.shared }
         let launcherOK = register(settings.launcherHotkey, id: Self.launcherID)
         let clipboardOK = register(settings.clipboardHotkey, id: Self.clipboardID)
+        let captureOK = register(settings.captureHotkey, id: CaptureFeature.hotkeyID)
         MainThread.run {
-            SettingsStore.shared.noteRegistration(launcherOK: launcherOK, clipboardOK: clipboardOK)
+            SettingsStore.shared.noteRegistration(
+                launcherOK: launcherOK,
+                clipboardOK: clipboardOK,
+                captureOK: captureOK
+            )
         }
     }
 
@@ -78,10 +81,15 @@ final class HotkeyManager {
     private func handle(id: UInt32) {
         MainThread.run {
             switch id {
-            case HotkeyManager.launcherID:
-                PaletteController.shared.toggle(.launcher)
-            case HotkeyManager.clipboardID:
-                PaletteController.shared.toggle(.clipboard)
+            case HotkeyManager.launcherID, HotkeyManager.clipboardID:
+                guard !CaptureController.shared.isActive else { return }
+                if id == HotkeyManager.launcherID {
+                    PaletteController.shared.toggle(.launcher)
+                } else {
+                    PaletteController.shared.toggle(.clipboard)
+                }
+            case CaptureFeature.hotkeyID:
+                CaptureController.shared.toggle()
             default:
                 break
             }

@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         FrontmostTracker.shared.start()
         AccessibilityPermission.shared.start()
+        ScreenRecordingPermission.shared.start()
         HotkeyManager.shared.start()
         AppIndex.shared.start()
         ClipboardStore.shared.load()

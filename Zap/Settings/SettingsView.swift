@@ -5,6 +5,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject private var settings = SettingsStore.shared
     @ObservedObject private var access = AccessibilityPermission.shared
+    @ObservedObject private var screenRecording = ScreenRecordingPermission.shared
     @ObservedObject private var clipboard = ClipboardStore.shared
     @State private var confirmClear = false
 
@@ -39,6 +40,11 @@ struct SettingsView: View {
                     chord: settings.clipboardHotkey,
                     warning: settings.clipboardWarning
                 ) { settings.setClipboardHotkey($0) }
+                HotkeyRow(
+                    title: L10n.capture,
+                    chord: settings.captureHotkey,
+                    warning: settings.captureWarning
+                ) { settings.setCaptureHotkey($0) }
                 Text(L10n.hotkeyHelp)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -77,6 +83,33 @@ struct SettingsView: View {
                 }
             } header: {
                 Text(L10n.accessibilityTitle)
+            }
+
+            Section {
+                LabeledContent(L10n.screenRecordingTitle) {
+                    Text(screenRecording.isTrusted ? "已授权" : "未授权")
+                        .foregroundStyle(screenRecording.isTrusted ? .green : .orange)
+                }
+                Text(L10n.screenRecordingBody)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Text(L10n.screenRecordingPath)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(L10n.screenRecordingRestart)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button(L10n.grantAccess) {
+                        screenRecording.prompt()
+                    }
+                    .disabled(screenRecording.isTrusted)
+                    Button(L10n.openSystemSettings) {
+                        screenRecording.openSystemSettings()
+                    }
+                }
+            } header: {
+                Text(L10n.screenRecordingTitle)
             }
 
             Section {

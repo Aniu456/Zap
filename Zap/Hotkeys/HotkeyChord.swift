@@ -46,6 +46,17 @@ struct HotkeyChord: Codable, Equatable, Hashable {
         modifiers: NSEvent.ModifierFlags([.option, .shift]).rawValue
     )
 
+    static let captureDefault = HotkeyChord(
+        keyCode: UInt16(kVK_ANSI_S),
+        modifiers: NSEvent.ModifierFlags([.option, .shift]).rawValue
+    )
+
+    /// Used only when the saved capture chord collides with another saved chord.
+    static let captureFallback = HotkeyChord(
+        keyCode: UInt16(kVK_ANSI_A),
+        modifiers: NSEvent.ModifierFlags([.option, .shift]).rawValue
+    )
+
     static func isModifierOnly(_ keyCode: UInt16) -> Bool {
         switch Int(keyCode) {
         case kVK_Command, kVK_Shift, kVK_Option, kVK_Control,

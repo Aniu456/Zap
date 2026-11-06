@@ -11,8 +11,10 @@ enum L10n {
 
     static let openLauncher = "打开启动器"
     static let openClipboard = "剪贴板历史"
+    static let openCapture = "区域截图"
     static let launcher = "启动器"
     static let clipboard = "剪贴板"
+    static let capture = "区域截图"
 
     static let searchApps = "搜索应用"
     static let searchClipboard = "搜索剪贴板历史"
@@ -32,6 +34,13 @@ enum L10n {
 
     static let accessibilityGranted = "辅助功能：已授权"
     static let accessibilityMissing = "辅助功能：未授权…"
+    static let screenRecordingGranted = "屏幕录制：已授权"
+    static let screenRecordingMissing = "屏幕录制：未授权…"
+    static let screenRecordingTitle = "屏幕录制"
+    static let screenRecordingBody = "区域截图需要「屏幕录制」权限。系统会把一闪加进列表，你再打开开关。截到的是按下快捷键那一刻的画面。"
+    static let screenRecordingPath = "系统设置 → 隐私与安全性 → 屏幕录制 → 打开「一闪」或 Zap"
+    static let screenRecordingRestart = "如果刚刚打开了权限却仍截不到画面，退出并重新打开一闪。"
+    static let screenRecordingNeeded = "需要屏幕录制权限才能截图"
     static let accessibilityTitle = "辅助功能"
     static let accessibilityBody = "把历史直接粘贴到当前应用，需要「辅助功能」权限。未授权时，选中一条记录仍会放回系统剪贴板，再用 ⌘V 粘贴即可。启动器不依赖这项权限。"
     static let accessibilityBanner = "还没有辅助功能权限。选中后请按 ⌘V 粘贴。"
@@ -44,7 +53,7 @@ enum L10n {
     static let hotkeyHelp = "点按按键框，再按下新的组合。至少要有一个修饰键。Esc 取消。"
     static let recording = "请按下快捷键…"
     static let restoreDefaults = "恢复默认快捷键"
-    static let defaultHotkeys = "默认是 ⌥Space 打开启动器，⌥⇧Space 打开剪贴板历史。"
+    static let defaultHotkeys = "默认是 ⌥Space 打开启动器，⌥⇧Space 打开剪贴板历史，⌥⇧S 区域截图。"
     static let hotkeyConflict = "这个快捷键已经用于另一项功能"
     static let hotkeyRejected = "系统没有接受这个快捷键，它可能已被占用"
 
@@ -58,5 +67,21 @@ enum L10n {
 
     static let pasteFallback = "已放回剪贴板，按 ⌘V 粘贴"
     static let launchFailed = "无法打开此应用"
-    static let laterCapture = "区域截图、标注和置顶会在以后的版本加入。"
+    static let laterCapture = "区域截图可以画箭头、方框、文字和马赛克，然后复制或置顶在其他窗口上。"
+
+    static let toolArrow = "箭头"
+    static let toolBox = "方框"
+    static let toolText = "文字"
+    static let toolMosaic = "马赛克"
+    static let undo = "撤销"
+    static let copyCapture = "复制"
+    static let pinCapture = "置顶"
+    static let closePin = "关闭"
+    static let captureSelectHint = "拖拽选择区域，Esc 取消"
+    static let captureEditHint = "1 箭头   2 方框   3 文字   4 马赛克   ⌘Z 撤销   ↩ 复制   ⌘P 置顶   Esc 取消"
+    static let captureCaption = "截图"
+    static let captureCopied = "已复制到剪贴板"
+    static let capturePinned = "已置顶，并复制到剪贴板"
+    static let captureTooLarge = "已复制。这张图超过 8 MB，没有写入历史"
+    static let captureFailed = "没有截到屏幕"
 }
