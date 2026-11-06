@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import UniformTypeIdentifiers
 
 /// Main-thread capture UI. Callers are already on the main actor.
 final class CaptureSession: NSObject, NSTextFieldDelegate {
@@ -26,12 +27,15 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
     private var crop: CGImage?
     private var preview: CGImage?
     private var marks: [CaptureMark] = []
+    private var undoStack: [[CaptureMark]] = []
+    private var redoStack: [[CaptureMark]] = []
     private var draft: CaptureMark?
     private var tool: CaptureTool = .arrow
     private var textField: NSTextField?
     private var toolbar: CaptureToolbar?
     private var globalMouseMonitor: Any?
     private var finished = false
+    private var eraserSnapshotTaken = false
 
     private enum Phase {
         case selecting
@@ -70,8 +74,9 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
         }
         NSApp.activate()
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp, .leftMouseDragged]) { [weak self] event in
-            guard let self else { return }
-            self.routeGlobal(event)
+            MainActor.assumeIsolated {
+                self?.routeGlobal(event)
+            }
         }
         let mouse = NSEvent.mouseLocation
         let key = windows.values.first { $0.frame.contains(mouse) } ?? windows.values.first
@@ -97,6 +102,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
             background: shot.image,
             selection: isActive ? selection : nil,
             preview: isActive ? preview : nil,
+            marks: isActive ? marks : [],
             draft: isActive ? draft : nil,
             cropSize: isActive ? crop.map { CGSize(width: $0.width, height: $0.height) } : nil,
             hint: isActive || phase == .selecting ? hint : ""
@@ -121,6 +127,12 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
                 presentTextField(at: point)
                 return
             }
+            if tool == .eraser {
+                dragStart = point
+                eraserSnapshotTaken = false
+                erase(at: point)
+                return
+            }
             dragStart = point
             draft = nil
             redraw()
@@ -136,7 +148,15 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
             redraw()
         case .editing:
             guard let selection, selection.contains(dragStart) else { return }
-            draft = mark(from: dragStart, to: local)
+            if tool == .eraser {
+                erase(at: local)
+                return
+            }
+            if tool == .pencil || tool == .marker {
+                appendStroke(to: local, from: dragStart)
+            } else {
+                draft = mark(from: dragStart, to: local)
+            }
             redraw()
         }
     }
@@ -157,15 +177,30 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
                 redraw()
             }
         case .editing:
-            guard let draft, CaptureGeometry.isDrag(from: start, to: local) else {
+            if tool == .eraser {
+                eraserSnapshotTaken = false
+                self.dragStart = nil
+                redraw()
+                return
+            }
+            guard let draft else {
+                redraw()
+                return
+            }
+            let keep: Bool
+            if case .stroke(let points, _, _) = draft {
+                keep = points.count >= 2
+            } else {
+                keep = CaptureGeometry.isDrag(from: start, to: local)
+            }
+            guard keep else {
                 self.draft = nil
                 redraw()
                 return
             }
-            marks.append(draft)
+            let committed = draft
             self.draft = nil
-            refreshPreview()
-            redraw()
+            commitMark(committed)
         }
     }
 
@@ -179,6 +214,18 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
         guard phase == .editing else { return }
         if modifiers.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "z", !modifiers.contains(.shift) {
             undo()
+            return
+        }
+        if modifiers.contains(.command), modifiers.contains(.shift), event.charactersIgnoringModifiers?.lowercased() == "z" {
+            redo()
+            return
+        }
+        if modifiers.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "s" {
+            saveToFile()
+            return
+        }
+        if modifiers.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "c" {
+            commit(pin: false)
             return
         }
         if modifiers.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "p" {
@@ -195,6 +242,9 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
         case kVK_ANSI_2: setTool(.box)
         case kVK_ANSI_3: setTool(.text)
         case kVK_ANSI_4: setTool(.mosaic)
+        case kVK_ANSI_5: setTool(.pencil)
+        case kVK_ANSI_6: setTool(.marker)
+        case kVK_ANSI_7: setTool(.eraser)
         default: break
         }
     }
@@ -226,11 +276,36 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
     }
 
     private func undo() {
-        guard !marks.isEmpty else {
+        guard let previous = undoStack.popLast() else {
             NSSound.beep()
             return
         }
-        marks.removeLast()
+        redoStack.append(marks)
+        marks = previous
+        draft = nil
+        refreshPreview()
+        redraw()
+    }
+
+    private func redo() {
+        guard let next = redoStack.popLast() else {
+            NSSound.beep()
+            return
+        }
+        undoStack.append(marks)
+        marks = next
+        draft = nil
+        refreshPreview()
+        redraw()
+    }
+
+    private func commitMark(_ mark: CaptureMark) {
+        undoStack.append(marks)
+        if undoStack.count > 40 {
+            undoStack.removeFirst()
+        }
+        redoStack.removeAll()
+        marks.append(mark)
         refreshPreview()
         redraw()
     }
@@ -252,7 +327,9 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
         }
         crop = cropped
         phase = .editing
-        refreshPreview()
+        // Leave preview nil. The overlay keeps painting the frozen screenshot inside
+        // the selection, so finishing the drag does not swap in a new bitmap.
+        preview = nil
         installToolbar()
         redraw()
         makeOverlayFirstResponder()
@@ -264,8 +341,10 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
         let toolbar = CaptureToolbar(frame: .zero)
         toolbar.onTool = { [weak self] tool in self?.setTool(tool) }
         toolbar.onUndo = { [weak self] in self?.undo() }
+        toolbar.onRedo = { [weak self] in self?.redo() }
         toolbar.onCopy = { [weak self] in self?.commit(pin: false) }
         toolbar.onPin = { [weak self] in self?.commit(pin: true) }
+        toolbar.onSave = { [weak self] in self?.saveToFile() }
         toolbar.onCancel = { [weak self] in self?.cancel() }
         toolbar.setTool(tool)
         let size = toolbar.frame.size
@@ -313,10 +392,10 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
             let imageSize = CGSize(width: crop.width, height: crop.height)
             let origin = CaptureGeometry.cropPixel(fromViewPoint: topLeft, selection: selection, imageSize: imageSize)
             let fontPixels = 18 * imageSize.height / max(selection.height, 1)
-            marks.append(.text(string, origin: origin, fontSize: fontPixels))
-            refreshPreview()
+            commitMark(.text(string, origin: origin, fontSize: fontPixels))
+        } else {
+            redraw()
         }
-        redraw()
         makeOverlayFirstResponder()
     }
 
@@ -329,12 +408,45 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
     }
 
     private func commit(pin: Bool) {
+        guard let rendered = exportRender() else { return }
+        finish(Outcome(
+            kind: pin ? .pinned : .copied,
+            png: rendered.png,
+            image: rendered.image,
+            screenFrame: rendered.screenFrame
+        ))
+    }
+
+    private func saveToFile() {
+        guard let rendered = exportRender() else { return }
+        let previousLevels = windows.mapValues(\.level)
+        for window in windows.values {
+            window.level = .floating
+        }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.png]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = Self.defaultFileName()
+        let response = panel.runModal()
+        for (displayID, window) in windows {
+            window.level = previousLevels[displayID] ?? .screenSaver
+        }
+        guard response == .OK, let url = panel.url else { return }
+        do {
+            try rendered.png.write(to: url)
+            showToast(L10n.captureSaved)
+        } catch {
+            showToast(L10n.captureSaveFailed)
+        }
+    }
+
+    private func exportRender() -> (png: Data, image: NSImage, screenFrame: NSRect)? {
         guard let crop, let selection, let displayID = activeDisplay,
-              let shot = shots.first(where: { $0.displayID == displayID }) else { return }
+              let shot = shots.first(where: { $0.displayID == displayID }) else { return nil }
         let rendered = CaptureRenderer.render(base: crop, marks: marks) ?? crop
         guard let png = CaptureRenderer.pngData(from: rendered) else {
-            ToastCenter.shared.show(L10n.captureFailed)
-            return
+            showToast(L10n.captureFailed)
+            return nil
         }
         let pointSize = NSSize(width: max(selection.width, 1), height: max(selection.height, 1))
         let image = NSImage(cgImage: rendered, size: pointSize)
@@ -344,7 +456,20 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
             width: pointSize.width,
             height: pointSize.height
         )
-        finish(Outcome(kind: pin ? .pinned : .copied, png: png, image: image, screenFrame: screenFrame))
+        return (png, image, screenFrame)
+    }
+
+    private func showToast(_ message: String) {
+        MainActor.assumeIsolated {
+            ToastCenter.shared.show(message)
+        }
+    }
+
+    private static func defaultFileName() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh-Hans-SG")
+        formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        return "截图 \(formatter.string(from: Date())).png"
     }
 
     private func refreshPreview() {
@@ -352,7 +477,15 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
             preview = nil
             return
         }
-        preview = CaptureRenderer.render(base: crop, marks: marks) ?? crop
+        let mosaics = marks.filter { mark in
+            if case .mosaic = mark { return true }
+            return false
+        }
+        guard !mosaics.isEmpty else {
+            preview = nil
+            return
+        }
+        preview = CaptureRenderer.render(base: crop, marks: mosaics)
     }
 
     private func mark(from start: CGPoint, to end: CGPoint) -> CaptureMark? {
@@ -367,9 +500,89 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
             return .box(CGRect(x: from.x, y: from.y, width: to.x - from.x, height: to.y - from.y))
         case .mosaic:
             return .mosaic(CGRect(x: from.x, y: from.y, width: to.x - from.x, height: to.y - from.y))
-        case .text:
+        case .pencil:
+            return .stroke(points: [from, to], width: strokeWidth(2.4), alpha: 1)
+        case .marker:
+            return .stroke(points: [from, to], width: strokeWidth(14), alpha: 0.45)
+        case .text, .eraser:
             return nil
         }
+    }
+
+    private func appendStroke(to viewPoint: CGPoint, from start: CGPoint) {
+        guard let selection, let crop else { return }
+        let imageSize = CGSize(width: crop.width, height: crop.height)
+        let pixel = CaptureGeometry.cropPixel(fromViewPoint: viewPoint, selection: selection, imageSize: imageSize)
+        if case .stroke(var points, let width, let alpha) = draft {
+            if let last = points.last, hypot(last.x - pixel.x, last.y - pixel.y) < 0.8 { return }
+            points.append(pixel)
+            draft = .stroke(points: points, width: width, alpha: alpha)
+            return
+        }
+        let origin = CaptureGeometry.cropPixel(fromViewPoint: start, selection: selection, imageSize: imageSize)
+        switch tool {
+        case .pencil:
+            draft = .stroke(points: [origin, pixel], width: strokeWidth(2.4), alpha: 1)
+        case .marker:
+            draft = .stroke(points: [origin, pixel], width: strokeWidth(14), alpha: 0.45)
+        default:
+            break
+        }
+    }
+
+    private func strokeWidth(_ points: CGFloat) -> CGFloat {
+        guard let selection, let crop else { return points }
+        return points * CGFloat(crop.height) / max(selection.height, 1)
+    }
+
+    private func erase(at viewPoint: CGPoint) {
+        guard let selection, let crop else { return }
+        let imageSize = CGSize(width: crop.width, height: crop.height)
+        let pixel = CaptureGeometry.cropPixel(fromViewPoint: viewPoint, selection: selection, imageSize: imageSize)
+        guard let index = marks.lastIndex(where: { markHits($0, point: pixel) }) else { return }
+        if !eraserSnapshotTaken {
+            undoStack.append(marks)
+            if undoStack.count > 40 {
+                undoStack.removeFirst()
+            }
+            redoStack.removeAll()
+            eraserSnapshotTaken = true
+        }
+        marks.remove(at: index)
+        refreshPreview()
+        redraw()
+    }
+
+    private func markHits(_ mark: CaptureMark, point: CGPoint) -> Bool {
+        switch mark {
+        case .arrow(let from, let to):
+            return distance(point, toSegmentFrom: from, to: to) < 14
+        case .box(let rect), .mosaic(let rect):
+            return CaptureGeometry.normalized(rect).insetBy(dx: -8, dy: -8).contains(point)
+        case .text(let string, let origin, let fontSize):
+            let width = max(fontSize, CGFloat(string.count) * fontSize * 0.9)
+            return CGRect(x: origin.x - 4, y: origin.y - 4, width: width + 8, height: fontSize * 1.4 + 8).contains(point)
+        case .stroke(let points, let width, _):
+            guard points.count >= 2 else { return false }
+            let limit = max(10, width)
+            for index in 1..<points.count {
+                if distance(point, toSegmentFrom: points[index - 1], to: points[index]) <= limit {
+                    return true
+                }
+            }
+            return false
+        }
+    }
+
+    private func distance(_ point: CGPoint, toSegmentFrom start: CGPoint, to end: CGPoint) -> CGFloat {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let lengthSquared = dx * dx + dy * dy
+        if lengthSquared < 0.01 {
+            return hypot(point.x - start.x, point.y - start.y)
+        }
+        let t = min(1, max(0, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared))
+        return hypot(point.x - (start.x + t * dx), point.y - (start.y + t * dy))
     }
 
     private func routeGlobal(_ event: NSEvent) {
@@ -416,7 +629,8 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
 
     private func redraw() {
         toolbar?.setTool(tool)
-        toolbar?.setUndoEnabled(!marks.isEmpty)
+        toolbar?.setUndoEnabled(!undoStack.isEmpty)
+        toolbar?.setRedoEnabled(!redoStack.isEmpty)
         for view in views.values {
             view.needsDisplay = true
             view.window?.invalidateCursorRects(for: view)

@@ -111,6 +111,23 @@ enum CaptureGeometry {
         return clamped(PixelRect(x: x, y: y, width: width, height: height), imageWidth: imageWidth, imageHeight: imageHeight)
     }
 
+    /// View rect covered by an integer crop of the frozen screenshot.
+    /// Drawing that crop into this rect lines up with the full image drawn in `screenSize`.
+    static func viewRect(forCrop pixels: PixelRect, screenSize: CGSize, imageSize: CGSize) -> CGRect {
+        guard screenSize.width > 0, screenSize.height > 0, imageSize.width > 0, imageSize.height > 0,
+              pixels.width > 0, pixels.height > 0 else {
+            return .zero
+        }
+        let scaleX = imageSize.width / screenSize.width
+        let scaleY = imageSize.height / screenSize.height
+        let x = CGFloat(pixels.x) / scaleX
+        let width = CGFloat(pixels.width) / scaleX
+        let top = CGFloat(pixels.y) / scaleY
+        let height = CGFloat(pixels.height) / scaleY
+        let y = screenSize.height - top - height
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
     /// Keeps the toolbar on screen, preferring the space under the selection.
     static func toolbarOrigin(selection: CGRect, toolbarSize: CGSize, bounds: CGRect, gap: CGFloat = 8) -> CGPoint {
         var y = selection.minY - gap - toolbarSize.height

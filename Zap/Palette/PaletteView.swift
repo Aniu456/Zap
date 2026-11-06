@@ -46,6 +46,7 @@ struct PaletteView: View {
                 .font(.system(size: 18))
                 .focused($fieldFocused)
                 .autocorrectionDisabled()
+                .id(palette.fieldToken)
             if !palette.query.isEmpty {
                 Button {
                     palette.query = ""
