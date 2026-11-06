@@ -42,6 +42,18 @@ final class HotkeyManager {
         }
     }
 
+    /// Registers `launcher` and `clipboard`. On failure the previously saved chords are put back
+    /// and this returns false, so a rejected shortcut cannot replace a working one.
+    func commit(launcher: HotkeyChord, clipboard: HotkeyChord) -> Bool {
+        let fallback = currentChords()
+        let result = install(launcher: launcher, clipboard: clipboard)
+        guard result.launcher, result.clipboard else {
+            _ = install(launcher: fallback.launcher, clipboard: fallback.clipboard)
+            return false
+        }
+        return true
+    }
+
     /// Copies the saved chords out of the main actor before Carbon registration.
     private func currentChords() -> (launcher: HotkeyChord, clipboard: HotkeyChord) {
         MainActor.assumeIsolated {

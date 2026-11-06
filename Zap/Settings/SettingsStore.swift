@@ -29,10 +29,13 @@ final class SettingsStore: ObservableObject {
             launcherWarning = L10n.hotkeyConflict
             return
         }
+        guard HotkeyManager.shared.commit(launcher: chord, clipboard: clipboardHotkey) else {
+            launcherWarning = L10n.hotkeyRejected
+            return
+        }
         launcherHotkey = chord
         launcherWarning = nil
         save()
-        HotkeyManager.shared.registerAll()
     }
 
     func setClipboardHotkey(_ chord: HotkeyChord) {
@@ -40,19 +43,26 @@ final class SettingsStore: ObservableObject {
             clipboardWarning = L10n.hotkeyConflict
             return
         }
+        guard HotkeyManager.shared.commit(launcher: launcherHotkey, clipboard: chord) else {
+            clipboardWarning = L10n.hotkeyRejected
+            return
+        }
         clipboardHotkey = chord
         clipboardWarning = nil
         save()
-        HotkeyManager.shared.registerAll()
     }
 
     func restoreDefaultHotkeys() {
+        guard HotkeyManager.shared.commit(launcher: .launcherDefault, clipboard: .clipboardDefault) else {
+            launcherWarning = L10n.hotkeyRejected
+            clipboardWarning = L10n.hotkeyRejected
+            return
+        }
         launcherHotkey = .launcherDefault
         clipboardHotkey = .clipboardDefault
         launcherWarning = nil
         clipboardWarning = nil
         save()
-        HotkeyManager.shared.registerAll()
     }
 
     func noteRegistration(launcherOK: Bool, clipboardOK: Bool) {
