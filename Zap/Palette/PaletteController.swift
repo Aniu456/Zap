@@ -23,6 +23,7 @@ final class PaletteController: ObservableObject {
 
     private var panel: PalettePanel?
     private var keyMonitor: Any?
+    private var clickMonitor: Any?
 
     private init() {}
 
@@ -44,6 +45,7 @@ final class PaletteController: ObservableObject {
         NSApp.activate()
         panel.orderFrontRegardless()
         installKeyMonitor()
+        installClickMonitor()
         AppIndex.shared.refreshIfStale()
         // makeKey on the same turn as installing the hosting view throws on newer AppKit.
         DispatchQueue.main.async {
@@ -68,14 +70,14 @@ final class PaletteController: ObservableObject {
         query = ""
         panel?.orderOut(nil)
         removeKeyMonitor()
+        removeClickMonitor()
     }
 
-    /// Called when the user clicks another app and the panel hides itself.
+    /// Called when the user clicks another app. Order the panel out; resigning alone
+    /// leaves a nonactivating window on screen when `hidesOnDeactivate` does not run.
     func handleResign() {
         guard isPresented else { return }
-        isPresented = false
-        query = ""
-        removeKeyMonitor()
+        hide()
     }
 
     func moveSelection(_ delta: Int) {
@@ -109,15 +111,24 @@ final class PaletteController: ObservableObject {
             NSApp.yieldActivation(to: target)
             _ = target.activate(from: .current, options: [])
         }
-        ClipboardStore.shared.placeOnPasteboard(item)
         let trusted = AccessibilityPermission.shared.isTrusted
         let pid = target?.processIdentifier
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            guard trusted, let pid else {
-                ToastCenter.shared.show(L10n.pasteFallback)
-                return
+        let writeAndPaste = {
+            MainActor.assumeIsolated {
+                // Write immediately before Command-V. The activation delay must not
+                // leave a newer clipboard value for the target app to paste.
+                ClipboardStore.shared.placeOnPasteboard(item)
+                guard trusted, let pid else {
+                    ToastCenter.shared.show(L10n.pasteFallback)
+                    return
+                }
+                PasteService.simulateCommandV(pid: pid)
             }
-            PasteService.simulateCommandV(pid: pid)
+        }
+        if target == nil || !trusted {
+            writeAndPaste()
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: writeAndPaste)
         }
     }
 
@@ -165,6 +176,28 @@ final class PaletteController: ObservableObject {
         }
     }
 
+    private func installClickMonitor() {
+        guard clickMonitor == nil else { return }
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { _ in
+            if Thread.isMainThread {
+                MainActor.assumeIsolated {
+                    PaletteController.shared.hideIfPointerOutsidePanel()
+                }
+            } else {
+                Task { @MainActor in
+                    PaletteController.shared.hideIfPointerOutsidePanel()
+                }
+            }
+        }
+    }
+
+    private func hideIfPointerOutsidePanel() {
+        guard isPresented, let panel else { return }
+        if !panel.frame.contains(NSEvent.mouseLocation) {
+            hide()
+        }
+    }
+
     /// Returns true when the palette consumed the key. The event itself stays outside the actor.
     private func handleKey(code: UInt16, modifierRaw: UInt) -> Bool {
         guard isPresented else { return false }
@@ -196,6 +229,13 @@ final class PaletteController: ObservableObject {
         if let keyMonitor {
             NSEvent.removeMonitor(keyMonitor)
             self.keyMonitor = nil
+        }
+    }
+
+    private func removeClickMonitor() {
+        if let clickMonitor {
+            NSEvent.removeMonitor(clickMonitor)
+            self.clickMonitor = nil
         }
     }
 }
