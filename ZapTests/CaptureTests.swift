@@ -1,6 +1,32 @@
 import XCTest
 @testable import Zap
 
+final class WindowSpacesTests: XCTestCase {
+    func testOverlayDoesNotUseTheMacOS26CrashCombination() {
+        let behavior = WindowSpaces.overlay
+        XCTAssertTrue(behavior.contains(.canJoinAllSpaces))
+        XCTAssertTrue(behavior.contains(.ignoresCycle))
+        XCTAssertFalse(behavior.contains(.moveToActiveSpace))
+        XCTAssertFalse(behavior.contains(.fullScreenAuxiliary))
+        XCTAssertFalse(behavior.contains(.stationary))
+    }
+
+    func testSanitizerDropsMoveToActiveSpaceWhenJoiningAllSpaces() {
+        let behavior = WindowSpaces.sanitized([
+            .canJoinAllSpaces,
+            .moveToActiveSpace,
+            .fullScreenAuxiliary,
+            .stationary,
+            .ignoresCycle
+        ])
+        XCTAssertTrue(behavior.contains(.canJoinAllSpaces))
+        XCTAssertTrue(behavior.contains(.ignoresCycle))
+        XCTAssertFalse(behavior.contains(.moveToActiveSpace))
+        XCTAssertFalse(behavior.contains(.fullScreenAuxiliary))
+        XCTAssertFalse(behavior.contains(.stationary))
+    }
+}
+
 final class CaptureGeometryTests: XCTestCase {
     func testNormalizedRectIgnoresDragDirection() {
         let forward = CGRect(x: 10, y: 20, width: 30, height: 40)

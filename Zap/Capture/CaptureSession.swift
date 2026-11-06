@@ -53,7 +53,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
             )
             window.setFrame(shot.frame, display: false)
             window.level = .screenSaver
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+            WindowSpaces.apply(to: window)
             window.isReleasedWhenClosed = false
             window.isOpaque = true
             window.backgroundColor = .black

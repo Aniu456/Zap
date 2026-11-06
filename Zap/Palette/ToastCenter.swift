@@ -35,7 +35,7 @@ final class ToastCenter {
         )
         panel.isFloatingPanel = true
         panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        WindowSpaces.apply(to: panel)
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true

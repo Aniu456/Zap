@@ -19,7 +19,7 @@ final class PinWindowController: NSObject {
         super.init()
         window.isFloatingPanel = true
         window.level = .floating
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        WindowSpaces.apply(to: window)
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = true

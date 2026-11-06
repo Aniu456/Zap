@@ -205,7 +205,7 @@ final class PalettePanel: NSPanel {
         )
         isFloatingPanel = true
         level = .popUpMenu
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        WindowSpaces.apply(to: self)
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
