@@ -1,0 +1,13 @@
+一闪 Zap
+Copyright (c) 2026 Benny
+
+本仓库的应用源码按仓库根目录的 MIT 许可分发。
+
+随发布包链接的第三方组件：
+
+- Sparkle 2.10.1
+  https://github.com/sparkle-project/Sparkle
+  Copyright (c) 2006-2013 Andy Matuschak，以及 LICENSE 中列出的其他版权人。
+  MIT。许可全文见 ThirdParty/Sparkle/LICENSE。
+
+当前树没有纳入 capcap、Maccy、Buffer、Snapzy、tinycast、macshot、Deck 或 OneClip 的源码。这些项目的说明见 README 的「参考与致谢」。

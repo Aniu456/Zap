@@ -128,6 +128,14 @@ struct SettingsView: View {
                 Text(versionText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Text(L10n.updatesHelp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button(L10n.checkForUpdates) {
+                    (NSApp.delegate as? AppDelegate)?.checkForUpdates(nil)
+                }
+            } header: {
+                Text(L10n.updates)
             }
         }
         .formStyle(.grouped)
