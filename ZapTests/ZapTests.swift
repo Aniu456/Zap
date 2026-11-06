@@ -60,6 +60,34 @@ final class ClipboardHistoryTests: XCTestCase {
         XCTAssertEqual(update.removed.map(\.contentHash), ["4"])
     }
 
+    func testTrimKeepsPinnedItems() {
+        var pinned = makeItem(hash: "pinned", offset: 0)
+        pinned.pinnedAt = Date(timeIntervalSince1970: 1)
+        let newer = (1..<5).map { makeItem(hash: "\($0)", offset: $0) }
+        let existing = newer + [pinned]
+        let update = ClipboardHistory.inserting(makeItem(hash: "new", offset: 9), into: existing, limit: 5)
+        XCTAssertEqual(update.items.count, 5)
+        XCTAssertTrue(update.items.contains(where: { $0.contentHash == "pinned" && $0.pinnedAt != nil }))
+        XCTAssertFalse(update.removed.contains(where: { $0.contentHash == "pinned" }))
+        XCTAssertEqual(update.removed.map(\.contentHash), ["4"])
+    }
+
+    func testDuplicateKeepsPin() {
+        var older = makeItem(hash: "a", offset: 1)
+        older.pinnedAt = Date(timeIntervalSince1970: 8)
+        let update = ClipboardHistory.inserting(makeItem(hash: "a", offset: 3), into: [older], limit: 10)
+        XCTAssertEqual(update.items[0].id, older.id)
+        XCTAssertEqual(update.items[0].pinnedAt, older.pinnedAt)
+    }
+
+    func testDisplayOrderPinsFirst() {
+        var pinned = makeItem(hash: "pinned", offset: 1)
+        pinned.pinnedAt = Date(timeIntervalSince1970: 10)
+        let fresh = makeItem(hash: "fresh", offset: 50)
+        let ordered = ClipboardHistory.sortedForDisplay([fresh, pinned])
+        XCTAssertEqual(ordered.map(\.contentHash), ["pinned", "fresh"])
+    }
+
     private func makeItem(hash: String, offset: Int) -> ClipboardItem {
         ClipboardItem(
             id: UUID(),

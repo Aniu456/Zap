@@ -13,6 +13,8 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     var contentHash: String
     var createdAt: Date
     var byteCount: Int
+    /// Set while the item is pinned. Pinned rows stay at the top and are not trimmed first.
+    var pinnedAt: Date? = nil
 
     /// Single-line text used both for search and for the row title.
     var searchableText: String {
@@ -52,10 +54,32 @@ enum ClipboardHistory {
             next.insert(item, at: 0)
         }
         var removed: [ClipboardItem] = []
-        if next.count > limit {
-            removed = Array(next.suffix(next.count - limit))
-            next.removeLast(next.count - limit)
+        while next.count > limit {
+            // Drop the oldest unpinned row. Pinned rows stay until the user unpins or deletes them.
+            if let index = next.lastIndex(where: { $0.pinnedAt == nil }) {
+                removed.append(next.remove(at: index))
+            } else if !next.isEmpty {
+                removed.append(next.removeLast())
+            } else {
+                break
+            }
         }
         return HistoryUpdate(items: next, removed: removed)
+    }
+
+    /// Pinned items first (most recently pinned), then everything else newest first.
+    static func sortedForDisplay(_ items: [ClipboardItem]) -> [ClipboardItem] {
+        items.sorted { lhs, rhs in
+            switch (lhs.pinnedAt, rhs.pinnedAt) {
+            case let (left?, right?):
+                return left > right
+            case (.some, .none):
+                return true
+            case (.none, .some):
+                return false
+            case (.none, .none):
+                return lhs.createdAt > rhs.createdAt
+            }
+        }
     }
 }

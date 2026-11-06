@@ -106,6 +106,24 @@ final class PaletteController: ObservableObject {
         }
     }
 
+    func deleteSelectedClipboardItem() {
+        guard mode == .clipboard else { return }
+        guard let item = selectedClipboardItem() else { return }
+        ClipboardStore.shared.delete(item.id)
+    }
+
+    func togglePinSelected() {
+        guard mode == .clipboard else { return }
+        guard let item = selectedClipboardItem() else { return }
+        ClipboardStore.shared.togglePin(item.id)
+    }
+
+    private func selectedClipboardItem() -> ClipboardItem? {
+        let rows = ClipboardStore.shared.ranked(matching: query)
+        guard !rows.isEmpty else { return nil }
+        return rows[min(selectedIndex, rows.count - 1)].item
+    }
+
     private func paste(_ item: ClipboardItem, into target: NSRunningApplication?) {
         if let target {
             NSApp.yieldActivation(to: target)
@@ -206,6 +224,10 @@ final class PaletteController: ObservableObject {
             return false
         }
         let flags = NSEvent.ModifierFlags(rawValue: modifierRaw).intersection([.command, .option, .control, .shift])
+        if flags == .command && (code == UInt16(kVK_Delete) || code == UInt16(kVK_ForwardDelete)) {
+            deleteSelectedClipboardItem()
+            return true
+        }
         if !flags.intersection([.command, .option, .control]).isEmpty { return false }
         switch Int(code) {
         case kVK_UpArrow:
