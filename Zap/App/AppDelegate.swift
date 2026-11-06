@@ -1,6 +1,19 @@
 import AppKit
 
+/// A nib-less AppKit app does not install an `@main` delegate on its own.
+/// `NSApplication.delegate` is weak, so this entry point retains the delegate.
 @main
+enum ZapMain {
+    private static let delegate = AppDelegate()
+
+    static func main() {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+        app.delegate = delegate
+        app.run()
+    }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: StatusItemController?
@@ -13,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         FrontmostTracker.shared.start()
         AccessibilityPermission.shared.start()
+        ScreenRecordingPermission.shared.start()
         HotkeyManager.shared.start()
         AppIndex.shared.start()
         ClipboardStore.shared.load()

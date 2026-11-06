@@ -3,8 +3,6 @@ import Foundation
 
 /// Carbon hot keys swallow the chord, so Option-Space does not also type into the front app.
 ///
-/// A later capture feature should register another id. `CaptureFeature.reservedHotkeyID` (3)
-/// is held for that and is not registered in v1.
 final class HotkeyManager {
     static let shared = HotkeyManager()
 
@@ -35,13 +33,47 @@ final class HotkeyManager {
     }
 
     func registerAll() {
-        unregisterAll()
-        let settings = MainThread.run { SettingsStore.shared }
-        let launcherOK = register(settings.launcherHotkey, id: Self.launcherID)
-        let clipboardOK = register(settings.clipboardHotkey, id: Self.clipboardID)
-        MainThread.run {
-            SettingsStore.shared.noteRegistration(launcherOK: launcherOK, clipboardOK: clipboardOK)
+        let chords = currentChords()
+        let result = install(launcher: chords.launcher, clipboard: chords.clipboard, capture: chords.capture)
+        MainActor.assumeIsolated {
+            SettingsStore.shared.noteRegistration(
+                launcherOK: result.launcher,
+                clipboardOK: result.clipboard,
+                captureOK: result.capture
+            )
         }
+    }
+
+    /// Registers all three chords. On failure the previously saved chords are put back
+    /// and this returns false, so a rejected shortcut cannot replace a working one.
+    func commit(launcher: HotkeyChord, clipboard: HotkeyChord, capture: HotkeyChord) -> Bool {
+        let fallback = currentChords()
+        let result = install(launcher: launcher, clipboard: clipboard, capture: capture)
+        guard result.launcher, result.clipboard, result.capture else {
+            _ = install(launcher: fallback.launcher, clipboard: fallback.clipboard, capture: fallback.capture)
+            return false
+        }
+        return true
+    }
+
+    /// Copies the saved chords out of the main actor before Carbon registration.
+    private func currentChords() -> (launcher: HotkeyChord, clipboard: HotkeyChord, capture: HotkeyChord) {
+        MainActor.assumeIsolated {
+            let settings = SettingsStore.shared
+            return (settings.launcherHotkey, settings.clipboardHotkey, settings.captureHotkey)
+        }
+    }
+
+    private func install(
+        launcher: HotkeyChord,
+        clipboard: HotkeyChord,
+        capture: HotkeyChord
+    ) -> (launcher: Bool, clipboard: Bool, capture: Bool) {
+        unregisterAll()
+        let launcherOK = register(launcher, id: Self.launcherID)
+        let clipboardOK = register(clipboard, id: Self.clipboardID)
+        let captureOK = register(capture, id: CaptureFeature.hotkeyID)
+        return (launcherOK, clipboardOK, captureOK)
     }
 
     private func installHandler() {
@@ -76,15 +108,31 @@ final class HotkeyManager {
     }
 
     private func handle(id: UInt32) {
-        MainThread.run {
-            switch id {
-            case HotkeyManager.launcherID:
-                PaletteController.shared.toggle(.launcher)
-            case HotkeyManager.clipboardID:
-                PaletteController.shared.toggle(.clipboard)
-            default:
-                break
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                HotkeyManager.perform(id)
             }
+        } else {
+            Task { @MainActor in
+                HotkeyManager.perform(id)
+            }
+        }
+    }
+
+    @MainActor
+    private static func perform(_ id: UInt32) {
+        switch id {
+        case launcherID, clipboardID:
+            guard !CaptureController.shared.isActive else { return }
+            if id == launcherID {
+                PaletteController.shared.toggle(.launcher)
+            } else {
+                PaletteController.shared.toggle(.clipboard)
+            }
+        case CaptureFeature.hotkeyID:
+            CaptureController.shared.toggle()
+        default:
+            break
         }
     }
 

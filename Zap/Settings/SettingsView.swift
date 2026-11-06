@@ -5,6 +5,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject private var settings = SettingsStore.shared
     @ObservedObject private var access = AccessibilityPermission.shared
+    @ObservedObject private var screenRecording = ScreenRecordingPermission.shared
     @ObservedObject private var clipboard = ClipboardStore.shared
     @State private var confirmClear = false
 
@@ -39,6 +40,11 @@ struct SettingsView: View {
                     chord: settings.clipboardHotkey,
                     warning: settings.clipboardWarning
                 ) { settings.setClipboardHotkey($0) }
+                HotkeyRow(
+                    title: L10n.capture,
+                    chord: settings.captureHotkey,
+                    warning: settings.captureWarning
+                ) { settings.setCaptureHotkey($0) }
                 Text(L10n.hotkeyHelp)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -77,6 +83,33 @@ struct SettingsView: View {
                 }
             } header: {
                 Text(L10n.accessibilityTitle)
+            }
+
+            Section {
+                LabeledContent(L10n.screenRecordingTitle) {
+                    Text(screenRecording.isTrusted ? "已授权" : "未授权")
+                        .foregroundStyle(screenRecording.isTrusted ? .green : .orange)
+                }
+                Text(L10n.screenRecordingBody)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Text(L10n.screenRecordingPath)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(L10n.screenRecordingRestart)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button(L10n.grantAccess) {
+                        screenRecording.prompt()
+                    }
+                    .disabled(screenRecording.isTrusted)
+                    Button(L10n.openSystemSettings) {
+                        screenRecording.openSystemSettings()
+                    }
+                }
+            } header: {
+                Text(L10n.screenRecordingTitle)
             }
 
             Section {
@@ -166,10 +199,12 @@ private final class HotkeyCapture: ObservableObject {
         HotkeyCapture.active = self
         HotkeyManager.shared.setSuspended(true)
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            MainThread.run { () -> NSEvent? in
-                guard let capture = HotkeyCapture.active else { return event }
-                return capture.handle(event)
+            let code = event.keyCode
+            let modifiers = event.modifierFlags.rawValue
+            let consumed = MainActor.assumeIsolated {
+                HotkeyCapture.active?.consume(keyCode: code, modifierRaw: modifiers) ?? false
             }
+            return consumed ? nil : event
         }
     }
 
@@ -188,20 +223,20 @@ private final class HotkeyCapture: ObservableObject {
         }
     }
 
-    private func handle(_ event: NSEvent) -> NSEvent? {
-        guard recording else { return event }
-        if event.keyCode == UInt16(kVK_Escape) {
+    fileprivate func consume(keyCode: UInt16, modifierRaw: UInt) -> Bool {
+        guard recording else { return false }
+        if keyCode == UInt16(kVK_Escape) {
             stop()
-            return nil
+            return true
         }
-        let modifiers = event.modifierFlags.intersection([.command, .option, .shift, .control])
-        if modifiers.isEmpty || HotkeyChord.isModifierOnly(event.keyCode) {
+        let modifiers = NSEvent.ModifierFlags(rawValue: modifierRaw).intersection([.command, .option, .shift, .control])
+        if modifiers.isEmpty || HotkeyChord.isModifierOnly(keyCode) {
             NSSound.beep()
-            return nil
+            return true
         }
-        let chord = HotkeyChord(keyCode: event.keyCode, modifiers: modifiers.rawValue)
+        let chord = HotkeyChord(keyCode: keyCode, modifiers: modifiers.rawValue)
         onCapture?(chord)
         stop()
-        return nil
+        return true
     }
 }

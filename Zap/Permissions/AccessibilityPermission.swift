@@ -16,7 +16,7 @@ final class AccessibilityPermission: ObservableObject {
     func start() {
         refresh()
         let timer = Timer(timeInterval: 1.5, repeats: true) { _ in
-            MainThread.run {
+            MainActor.assumeIsolated {
                 AccessibilityPermission.shared.refresh()
             }
         }

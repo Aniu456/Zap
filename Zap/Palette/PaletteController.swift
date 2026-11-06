@@ -23,6 +23,7 @@ final class PaletteController: ObservableObject {
 
     private var panel: PalettePanel?
     private var keyMonitor: Any?
+    private var clickMonitor: Any?
 
     private init() {}
 
@@ -43,9 +44,16 @@ final class PaletteController: ObservableObject {
         isPresented = true
         NSApp.activate()
         panel.orderFrontRegardless()
-        panel.makeKey()
         installKeyMonitor()
+        installClickMonitor()
         AppIndex.shared.refreshIfStale()
+        // makeKey on the same turn as installing the hosting view throws on newer AppKit.
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                guard PaletteController.shared.isPresented else { return }
+                PaletteController.shared.panel?.makeKey()
+            }
+        }
     }
 
     /// Esc, or the same hotkey again. Returns focus to the app the user was in.
@@ -62,14 +70,14 @@ final class PaletteController: ObservableObject {
         query = ""
         panel?.orderOut(nil)
         removeKeyMonitor()
+        removeClickMonitor()
     }
 
-    /// Called when the user clicks another app and the panel hides itself.
+    /// Called when the user clicks another app. Order the panel out; resigning alone
+    /// leaves a nonactivating window on screen when `hidesOnDeactivate` does not run.
     func handleResign() {
         guard isPresented else { return }
-        isPresented = false
-        query = ""
-        removeKeyMonitor()
+        hide()
     }
 
     func moveSelection(_ delta: Int) {
@@ -98,20 +106,47 @@ final class PaletteController: ObservableObject {
         }
     }
 
+    func deleteSelectedClipboardItem() {
+        guard mode == .clipboard else { return }
+        guard let item = selectedClipboardItem() else { return }
+        ClipboardStore.shared.delete(item.id)
+    }
+
+    func togglePinSelected() {
+        guard mode == .clipboard else { return }
+        guard let item = selectedClipboardItem() else { return }
+        ClipboardStore.shared.togglePin(item.id)
+    }
+
+    private func selectedClipboardItem() -> ClipboardItem? {
+        let rows = ClipboardStore.shared.ranked(matching: query)
+        guard !rows.isEmpty else { return nil }
+        return rows[min(selectedIndex, rows.count - 1)].item
+    }
+
     private func paste(_ item: ClipboardItem, into target: NSRunningApplication?) {
         if let target {
             NSApp.yieldActivation(to: target)
             _ = target.activate(from: .current, options: [])
         }
-        ClipboardStore.shared.placeOnPasteboard(item)
         let trusted = AccessibilityPermission.shared.isTrusted
         let pid = target?.processIdentifier
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            guard trusted, let pid else {
-                ToastCenter.shared.show(L10n.pasteFallback)
-                return
+        let writeAndPaste = {
+            MainActor.assumeIsolated {
+                // Write immediately before Command-V. The activation delay must not
+                // leave a newer clipboard value for the target app to paste.
+                ClipboardStore.shared.placeOnPasteboard(item)
+                guard trusted, let pid else {
+                    ToastCenter.shared.show(L10n.pasteFallback)
+                    return
+                }
+                PasteService.simulateCommandV(pid: pid)
             }
-            PasteService.simulateCommandV(pid: pid)
+        }
+        if target == nil || !trusted {
+            writeAndPaste()
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: writeAndPaste)
         }
     }
 
@@ -131,8 +166,6 @@ final class PaletteController: ObservableObject {
             rootView: PaletteView()
                 .environment(\.locale, Locale(identifier: "zh-Hans-SG"))
         )
-        host.wantsLayer = true
-        host.layer?.backgroundColor = NSColor.clear.cgColor
         panel.contentView = host
         self.panel = panel
         return panel
@@ -152,35 +185,65 @@ final class PaletteController: ObservableObject {
     private func installKeyMonitor() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            MainThread.run {
-                PaletteController.shared.handleKey(event)
+            let code = event.keyCode
+            let modifiers = event.modifierFlags.rawValue
+            let consumed = MainActor.assumeIsolated {
+                PaletteController.shared.handleKey(code: code, modifierRaw: modifiers)
+            }
+            return consumed ? nil : event
+        }
+    }
+
+    private func installClickMonitor() {
+        guard clickMonitor == nil else { return }
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { _ in
+            if Thread.isMainThread {
+                MainActor.assumeIsolated {
+                    PaletteController.shared.hideIfPointerOutsidePanel()
+                }
+            } else {
+                Task { @MainActor in
+                    PaletteController.shared.hideIfPointerOutsidePanel()
+                }
             }
         }
     }
 
-    private func handleKey(_ event: NSEvent) -> NSEvent? {
-        guard isPresented else { return event }
-        // Let an in-progress IME composition (Pinyin, etc.) keep arrows and Return.
-        if let text = panel?.firstResponder as? NSText, text.hasMarkedText() {
-            return event
+    private func hideIfPointerOutsidePanel() {
+        guard isPresented, let panel else { return }
+        if !panel.frame.contains(NSEvent.mouseLocation) {
+            hide()
         }
-        let blocked = event.modifierFlags.intersection([.command, .option, .control])
-        if !blocked.isEmpty { return event }
-        switch event.keyCode {
-        case UInt16(kVK_UpArrow):
+    }
+
+    /// Returns true when the palette consumed the key. The event itself stays outside the actor.
+    private func handleKey(code: UInt16, modifierRaw: UInt) -> Bool {
+        guard isPresented else { return false }
+        // NSText no longer exposes composition state. The field editor is an NSTextInputClient.
+        if let client = panel?.firstResponder as? any NSTextInputClient, client.hasMarkedText() {
+            return false
+        }
+        let flags = NSEvent.ModifierFlags(rawValue: modifierRaw).intersection([.command, .option, .control, .shift])
+        if flags == .command && (code == UInt16(kVK_Delete) || code == UInt16(kVK_ForwardDelete)) {
+            deleteSelectedClipboardItem()
+            return true
+        }
+        if !flags.intersection([.command, .option, .control]).isEmpty { return false }
+        switch Int(code) {
+        case kVK_UpArrow:
             moveSelection(-1)
-            return nil
-        case UInt16(kVK_DownArrow):
+            return true
+        case kVK_DownArrow:
             moveSelection(1)
-            return nil
-        case UInt16(kVK_Return), UInt16(kVK_ANSI_KeypadEnter):
+            return true
+        case kVK_Return, kVK_ANSI_KeypadEnter:
             commitSelection()
-            return nil
-        case UInt16(kVK_Escape):
+            return true
+        case kVK_Escape:
             dismiss()
-            return nil
+            return true
         default:
-            return event
+            return false
         }
     }
 
@@ -188,6 +251,13 @@ final class PaletteController: ObservableObject {
         if let keyMonitor {
             NSEvent.removeMonitor(keyMonitor)
             self.keyMonitor = nil
+        }
+    }
+
+    private func removeClickMonitor() {
+        if let clickMonitor {
+            NSEvent.removeMonitor(clickMonitor)
+            self.clickMonitor = nil
         }
     }
 }
@@ -199,13 +269,13 @@ final class PalettePanel: NSPanel {
     init() {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
-            styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
         isFloatingPanel = true
         level = .popUpMenu
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        WindowSpaces.apply(to: self)
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true

@@ -1,7 +1,7 @@
 import AppKit
 import Carbon
 
-struct HotkeyChord: Codable, Equatable, Hashable {
+struct HotkeyChord: Codable, Equatable, Hashable, Sendable {
     var keyCode: UInt16
     /// Raw value of the device-independent modifier flags that matter: command, option, shift, control.
     var modifiers: UInt
@@ -43,6 +43,17 @@ struct HotkeyChord: Codable, Equatable, Hashable {
 
     static let clipboardDefault = HotkeyChord(
         keyCode: UInt16(kVK_Space),
+        modifiers: NSEvent.ModifierFlags([.option, .shift]).rawValue
+    )
+
+    static let captureDefault = HotkeyChord(
+        keyCode: UInt16(kVK_ANSI_S),
+        modifiers: NSEvent.ModifierFlags([.option, .shift]).rawValue
+    )
+
+    /// Used only when the saved capture chord collides with another saved chord.
+    static let captureFallback = HotkeyChord(
+        keyCode: UInt16(kVK_ANSI_A),
         modifiers: NSEvent.ModifierFlags([.option, .shift]).rawValue
     )
 
