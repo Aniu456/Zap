@@ -20,6 +20,8 @@ final class PaletteController: ObservableObject {
     }
     @Published var selectedIndex = 0
     @Published private(set) var isPresented = false
+    /// Bumps every time the palette opens so the search field is recreated empty.
+    @Published private(set) var fieldToken = 0
 
     private var panel: PalettePanel?
     private var keyMonitor: Any?
@@ -37,8 +39,11 @@ final class PaletteController: ObservableObject {
 
     func show(_ mode: PaletteMode) {
         self.mode = mode
+        // Do not keep the last search. The field editor can write it back, so the
+        // text field is also recreated via fieldToken.
         query = ""
         selectedIndex = 0
+        fieldToken &+= 1
         let panel = ensurePanel()
         position(panel)
         isPresented = true
@@ -48,10 +53,14 @@ final class PaletteController: ObservableObject {
         installClickMonitor()
         AppIndex.shared.refreshIfStale()
         // makeKey on the same turn as installing the hosting view throws on newer AppKit.
+        // Clearing after makeKey drops a previous query the field editor writes back
+        // while resigning. The user cannot type until this returns.
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
                 guard PaletteController.shared.isPresented else { return }
                 PaletteController.shared.panel?.makeKey()
+                PaletteController.shared.query = ""
+                PaletteController.shared.selectedIndex = 0
             }
         }
     }

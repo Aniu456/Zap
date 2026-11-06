@@ -111,22 +111,44 @@ enum CaptureGeometry {
         return clamped(PixelRect(x: x, y: y, width: width, height: height), imageWidth: imageWidth, imageHeight: imageHeight)
     }
 
-    /// Keeps the toolbar on screen, preferring the space under the selection.
+    /// View rect covered by an integer crop of the frozen screenshot.
+    /// Drawing that crop into this rect lines up with the full image drawn in `screenSize`.
+    static func viewRect(forCrop pixels: PixelRect, screenSize: CGSize, imageSize: CGSize) -> CGRect {
+        guard screenSize.width > 0, screenSize.height > 0, imageSize.width > 0, imageSize.height > 0,
+              pixels.width > 0, pixels.height > 0 else {
+            return .zero
+        }
+        let scaleX = imageSize.width / screenSize.width
+        let scaleY = imageSize.height / screenSize.height
+        let x = CGFloat(pixels.x) / scaleX
+        let width = CGFloat(pixels.width) / scaleX
+        let top = CGFloat(pixels.y) / scaleY
+        let height = CGFloat(pixels.height) / scaleY
+        let y = screenSize.height - top - height
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    /// Default toolbar spot: the bottom-right of the selection. The bar's right
+    /// edge lines up with the selection, and the selection's bottom edge runs
+    /// through the middle of the bar. Off-screen positions are only clamped in.
     static func toolbarOrigin(selection: CGRect, toolbarSize: CGSize, bounds: CGRect, gap: CGFloat = 8) -> CGPoint {
-        var y = selection.minY - gap - toolbarSize.height
-        if y < bounds.minY + gap {
-            y = selection.maxY + gap
-        }
-        if y + toolbarSize.height > bounds.maxY - gap {
-            y = bounds.maxY - toolbarSize.height - gap
-        }
-        var x = selection.minX
-        if x + toolbarSize.width > bounds.maxX - gap {
-            x = bounds.maxX - toolbarSize.width - gap
-        }
-        x = max(bounds.minX + gap, x)
-        y = max(bounds.minY + gap, y)
-        return CGPoint(x: x, y: y)
+        let origin = CGPoint(
+            x: selection.maxX - toolbarSize.width,
+            y: selection.minY - toolbarSize.height / 2
+        )
+        return clampedToolbarOrigin(origin, toolbarSize: toolbarSize, bounds: bounds, gap: gap)
+    }
+
+    /// Pulls a dragged toolbar back on screen without moving it when it already fits.
+    static func clampedToolbarOrigin(_ origin: CGPoint, toolbarSize: CGSize, bounds: CGRect, gap: CGFloat = 8) -> CGPoint {
+        let minX = bounds.minX + gap
+        let minY = bounds.minY + gap
+        let maxX = max(minX, bounds.maxX - gap - toolbarSize.width)
+        let maxY = max(minY, bounds.maxY - gap - toolbarSize.height)
+        return CGPoint(
+            x: min(max(origin.x, minX), maxX),
+            y: min(max(origin.y, minY), maxY)
+        )
     }
 }
 

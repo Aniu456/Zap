@@ -1,3 +1,4 @@
+import CoreGraphics
 import XCTest
 @testable import Zap
 
@@ -83,27 +84,56 @@ final class CaptureGeometryTests: XCTestCase {
         XCTAssertEqual(flipped, CaptureGeometry.PixelRect(x: 2, y: 70, width: 4, height: 20))
     }
 
-    func testToolbarPrefersTheSpaceBelowAndStaysOnScreen() {
-        let below = CaptureGeometry.toolbarOrigin(
-            selection: CGRect(x: 20, y: 80, width: 100, height: 40),
+    func testToolbarSitsOnTheBottomRightEdge() {
+        let origin = CaptureGeometry.toolbarOrigin(
+            selection: CGRect(x: 40, y: 100, width: 200, height: 80),
             toolbarSize: CGSize(width: 120, height: 44),
             bounds: CGRect(x: 0, y: 0, width: 400, height: 300)
         )
-        XCTAssertEqual(below, CGPoint(x: 20, y: 28))
+        XCTAssertEqual(origin, CGPoint(x: 120, y: 78))
+        XCTAssertEqual(origin.x + 120, 240, accuracy: 0.001)
+        XCTAssertEqual(origin.y + 22, 100, accuracy: 0.001)
+    }
 
-        let above = CaptureGeometry.toolbarOrigin(
-            selection: CGRect(x: 20, y: 4, width: 100, height: 40),
+    func testToolbarWiderThanTheSelectionStaysRightAligned() {
+        let origin = CaptureGeometry.toolbarOrigin(
+            selection: CGRect(x: 100, y: 100, width: 50, height: 40),
             toolbarSize: CGSize(width: 120, height: 44),
             bounds: CGRect(x: 0, y: 0, width: 400, height: 300)
         )
-        XCTAssertEqual(above.y, 52, accuracy: 0.001)
+        XCTAssertEqual(origin.x + 120, 150, accuracy: 0.001)
+        XCTAssertEqual(origin.y + 22, 100, accuracy: 0.001)
+    }
 
-        let shifted = CaptureGeometry.toolbarOrigin(
-            selection: CGRect(x: 360, y: 80, width: 30, height: 40),
+    func testBottomRightToolbarIsPulledBackOntoTheScreen() {
+        let origin = CaptureGeometry.toolbarOrigin(
+            selection: CGRect(x: 40, y: 10, width: 200, height: 80),
             toolbarSize: CGSize(width: 120, height: 44),
             bounds: CGRect(x: 0, y: 0, width: 400, height: 300)
         )
-        XCTAssertLessThanOrEqual(shifted.x + 120, 392)
+        XCTAssertEqual(origin, CGPoint(x: 120, y: 8))
+    }
+
+    func testDraggedToolbarStaysPutUntilItWouldLeaveTheScreen() {
+        let size = CGSize(width: 120, height: 44)
+        let bounds = CGRect(x: 0, y: 0, width: 400, height: 300)
+        let parked = CaptureGeometry.clampedToolbarOrigin(CGPoint(x: 40, y: 40), toolbarSize: size, bounds: bounds)
+        XCTAssertEqual(parked, CGPoint(x: 40, y: 40))
+
+        let clipped = CaptureGeometry.clampedToolbarOrigin(CGPoint(x: -40, y: 500), toolbarSize: size, bounds: bounds)
+        XCTAssertEqual(clipped, CGPoint(x: 8, y: 248))
+    }
+
+    func testCropViewRectLinesUpWithAnAlignedSelection() {
+        let selection = CGRect(x: 10, y: 20, width: 30, height: 10)
+        let screen = CGSize(width: 100, height: 80)
+        let image = CGSize(width: 200, height: 160)
+        let pixels = CaptureGeometry.cropPixels(selection: selection, screenSize: screen, imageSize: image)
+        let frame = CaptureGeometry.viewRect(forCrop: pixels, screenSize: screen, imageSize: image)
+        XCTAssertEqual(frame.origin.x, selection.origin.x, accuracy: 0.001)
+        XCTAssertEqual(frame.origin.y, selection.origin.y, accuracy: 0.001)
+        XCTAssertEqual(frame.width, selection.width, accuracy: 0.001)
+        XCTAssertEqual(frame.height, selection.height, accuracy: 0.001)
     }
 }
 
@@ -173,5 +203,85 @@ final class MosaicBufferTests: XCTestCase {
             block: 2
         )
         XCTAssertEqual(pixels, original)
+    }
+}
+
+final class CaptureRendererOrientationTests: XCTestCase {
+    func testEmptyMarksKeepTheSameImage() {
+        let image = makeImage(width: 2, height: 2) { _, _ in (10, 20, 30, 255) }
+        let rendered = CaptureRenderer.render(base: image, marks: [])
+        XCTAssertTrue(rendered === image)
+    }
+
+    func testAnnotationsDoNotFlipTheScreenshot() {
+        let image = makeImage(width: 8, height: 8) { _, y in
+            y == 0 ? (255, 0, 0, 255) : (0, 0, 255, 255)
+        }
+        let rendered = CaptureRenderer.render(
+            base: image,
+            marks: [.box(CGRect(x: 3, y: 3, width: 2, height: 2))]
+        )
+        let top = sample(rendered, x: 0, yFromTop: 0)
+        let bottom = sample(rendered, x: 0, yFromTop: 7)
+        XCTAssertNotNil(top)
+        XCTAssertNotNil(bottom)
+        XCTAssertGreaterThan(top!.0, 200)
+        XCTAssertLessThan(top!.2, 40)
+        XCTAssertLessThan(bottom!.0, 40)
+        XCTAssertGreaterThan(bottom!.2, 200)
+    }
+
+    func testMosaicStaysInTheTopLeftOfAnUprightImage() {
+        let image = makeImage(width: 8, height: 8) { x, y in
+            (UInt8(x * 30), UInt8(y * 30), 0, 255)
+        }
+        let rendered = CaptureRenderer.render(
+            base: image,
+            marks: [.mosaic(CGRect(x: 0, y: 0, width: 4, height: 4))]
+        )
+        let topLeft = sample(rendered, x: 0, yFromTop: 0)
+        let bottomLeft = sample(rendered, x: 0, yFromTop: 7)
+        XCTAssertNotNil(topLeft)
+        XCTAssertNotNil(bottomLeft)
+        XCTAssertGreaterThan(Int(topLeft!.0) + Int(topLeft!.1), 0)
+        XCTAssertEqual(bottomLeft!.0, 0)
+        XCTAssertGreaterThan(bottomLeft!.1, 180)
+    }
+
+    private func makeImage(width: Int, height: Int, fill: (Int, Int) -> (UInt8, UInt8, UInt8, UInt8)) -> CGImage {
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        for y in 0..<height {
+            for x in 0..<width {
+                let pixel = fill(x, y)
+                let index = (y * width + x) * 4
+                bytes[index] = pixel.0
+                bytes[index + 1] = pixel.1
+                bytes[index + 2] = pixel.2
+                bytes[index + 3] = pixel.3
+            }
+        }
+        let provider = CGDataProvider(data: Data(bytes) as CFData)!
+        return CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        )!
+    }
+
+    private func sample(_ image: CGImage?, x: Int, yFromTop: Int) -> (UInt8, UInt8, UInt8, UInt8)? {
+        guard let image, image.bitsPerPixel >= 32, let data = image.dataProvider?.data else { return nil }
+        let length = CFDataGetLength(data)
+        guard let pointer = CFDataGetBytePtr(data) else { return nil }
+        let offset = yFromTop * image.bytesPerRow + x * 4
+        guard offset >= 0, offset + 3 < length else { return nil }
+        return (pointer[offset], pointer[offset + 1], pointer[offset + 2], pointer[offset + 3])
     }
 }
