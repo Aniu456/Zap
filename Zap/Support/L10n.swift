@@ -31,6 +31,9 @@ enum L10n {
     static let open = "打开"
     static let paste = "粘贴"
     static let close = "关闭"
+    static let pin = "置顶"
+    static let unpin = "取消置顶"
+    static let deleteItem = "删除这条"
 
     static let accessibilityGranted = "辅助功能：已授权"
     static let accessibilityMissing = "辅助功能：未授权…"
@@ -58,7 +61,7 @@ enum L10n {
     static let hotkeyRejected = "系统没有接受这个快捷键，它可能已被占用"
 
     static let clipboardSection = "剪贴板"
-    static let clipboardLimit = "最多保留 200 条。超过约 20 万字的文本，以及大于 8 MB 的图片不会记入。标记为密码或临时内容的剪贴板会被跳过。"
+    static let clipboardLimit = "最多保留 200 条。置顶的记录留在最前面，也不会被这条上限自动清掉；可以只删除一条。超过约 20 万字的文本，以及大于 8 MB 的图片不会记入。标记为密码或临时内容的剪贴板会被跳过。"
     static let clearHistory = "清空历史"
     static let clearTitle = "清空剪贴板历史？"
     static let clearMessage = "本机保存的文本和图片记录会被删除。此操作无法撤销。"

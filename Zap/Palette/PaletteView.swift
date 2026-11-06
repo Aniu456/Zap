@@ -115,16 +115,12 @@ struct PaletteView: View {
             } else {
                 scrollList(count: rows.count) { index in
                     let row = rows[index]
-                    resultButton(index: index, selected: safeIndex(rows.count) == index) {
-                        clipIcon(row.item)
-                        highlighted(row.item.displayText, indices: row.match.indices.filter { $0 < row.item.displayText.count })
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        Text(RelativeTime.string(from: row.item.createdAt))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .layoutPriority(1)
-                    }
+                    clipboardRow(
+                        index: index,
+                        item: row.item,
+                        indices: row.match.indices,
+                        selected: safeIndex(rows.count) == index
+                    )
                 }
             }
         }
@@ -166,6 +162,61 @@ struct PaletteView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { inside in
+            if inside { palette.selectedIndex = index }
+        }
+    }
+
+    private func clipboardRow(index: Int, item: ClipboardItem, indices: [Int], selected: Bool) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                palette.selectedIndex = index
+                palette.commitSelection()
+            } label: {
+                HStack(spacing: 10) {
+                    clipIcon(item)
+                    highlighted(item.displayText, indices: indices.filter { $0 < item.displayText.count })
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if item.pinnedAt != nil {
+                        Image(systemName: "pin.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    Text(RelativeTime.string(from: item.createdAt))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .layoutPriority(1)
+                }
+            }
+            .buttonStyle(.plain)
+            if selected {
+                Button {
+                    palette.selectedIndex = index
+                    palette.togglePinSelected()
+                } label: {
+                    Image(systemName: item.pinnedAt == nil ? "pin" : "pin.slash")
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .help(item.pinnedAt == nil ? L10n.pin : L10n.unpin)
+                Button {
+                    palette.selectedIndex = index
+                    palette.deleteSelectedClipboardItem()
+                } label: {
+                    Image(systemName: "trash")
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .help(L10n.deleteItem)
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(selected ? Color.accentColor.opacity(0.22) : Color.clear)
+        )
         .onHover { inside in
             if inside { palette.selectedIndex = index }
         }
@@ -242,6 +293,9 @@ struct PaletteView: View {
             keyHint("↑↓", L10n.choose)
             keyHint("↩", palette.mode == .launcher ? L10n.open : L10n.paste)
             keyHint("esc", L10n.close)
+            if palette.mode == .clipboard {
+                keyHint("⌘⌫", L10n.deleteItem)
+            }
             Spacer()
             Text(palette.mode == .launcher ? settings.launcherHotkey.displayString : settings.clipboardHotkey.displayString)
                 .font(.system(size: 11, weight: .medium))

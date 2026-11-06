@@ -40,10 +40,13 @@ final class SettingsStore: ObservableObject {
             launcherWarning = L10n.hotkeyConflict
             return
         }
+        guard HotkeyManager.shared.commit(launcher: chord, clipboard: clipboardHotkey, capture: captureHotkey) else {
+            launcherWarning = L10n.hotkeyRejected
+            return
+        }
         launcherHotkey = chord
         launcherWarning = nil
         save()
-        HotkeyManager.shared.registerAll()
     }
 
     func setClipboardHotkey(_ chord: HotkeyChord) {
@@ -51,10 +54,13 @@ final class SettingsStore: ObservableObject {
             clipboardWarning = L10n.hotkeyConflict
             return
         }
+        guard HotkeyManager.shared.commit(launcher: launcherHotkey, clipboard: chord, capture: captureHotkey) else {
+            clipboardWarning = L10n.hotkeyRejected
+            return
+        }
         clipboardHotkey = chord
         clipboardWarning = nil
         save()
-        HotkeyManager.shared.registerAll()
     }
 
     func setCaptureHotkey(_ chord: HotkeyChord) {
@@ -62,13 +68,26 @@ final class SettingsStore: ObservableObject {
             captureWarning = L10n.hotkeyConflict
             return
         }
+        guard HotkeyManager.shared.commit(launcher: launcherHotkey, clipboard: clipboardHotkey, capture: chord) else {
+            captureWarning = L10n.hotkeyRejected
+            return
+        }
         captureHotkey = chord
         captureWarning = nil
         save()
-        HotkeyManager.shared.registerAll()
     }
 
     func restoreDefaultHotkeys() {
+        guard HotkeyManager.shared.commit(
+            launcher: .launcherDefault,
+            clipboard: .clipboardDefault,
+            capture: .captureDefault
+        ) else {
+            launcherWarning = L10n.hotkeyRejected
+            clipboardWarning = L10n.hotkeyRejected
+            captureWarning = L10n.hotkeyRejected
+            return
+        }
         launcherHotkey = .launcherDefault
         clipboardHotkey = .clipboardDefault
         captureHotkey = .captureDefault
@@ -76,7 +95,6 @@ final class SettingsStore: ObservableObject {
         clipboardWarning = nil
         captureWarning = nil
         save()
-        HotkeyManager.shared.registerAll()
     }
 
     func noteRegistration(launcherOK: Bool, clipboardOK: Bool, captureOK: Bool) {

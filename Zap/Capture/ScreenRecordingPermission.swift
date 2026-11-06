@@ -16,8 +16,14 @@ final class ScreenRecordingPermission: ObservableObject {
     func start() {
         refresh()
         let timer = Timer(timeInterval: 1.5, repeats: true) { _ in
-            MainThread.run {
-                ScreenRecordingPermission.shared.refresh()
+            if Thread.isMainThread {
+                MainActor.assumeIsolated {
+                    ScreenRecordingPermission.shared.refresh()
+                }
+            } else {
+                Task { @MainActor in
+                    ScreenRecordingPermission.shared.refresh()
+                }
             }
         }
         timer.tolerance = 0.4

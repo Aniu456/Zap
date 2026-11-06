@@ -199,10 +199,12 @@ private final class HotkeyCapture: ObservableObject {
         HotkeyCapture.active = self
         HotkeyManager.shared.setSuspended(true)
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            MainThread.run { () -> NSEvent? in
-                guard let capture = HotkeyCapture.active else { return event }
-                return capture.handle(event)
+            let code = event.keyCode
+            let modifiers = event.modifierFlags.rawValue
+            let consumed = MainActor.assumeIsolated {
+                HotkeyCapture.active?.consume(keyCode: code, modifierRaw: modifiers) ?? false
             }
+            return consumed ? nil : event
         }
     }
 
@@ -221,20 +223,20 @@ private final class HotkeyCapture: ObservableObject {
         }
     }
 
-    private func handle(_ event: NSEvent) -> NSEvent? {
-        guard recording else { return event }
-        if event.keyCode == UInt16(kVK_Escape) {
+    fileprivate func consume(keyCode: UInt16, modifierRaw: UInt) -> Bool {
+        guard recording else { return false }
+        if keyCode == UInt16(kVK_Escape) {
             stop()
-            return nil
+            return true
         }
-        let modifiers = event.modifierFlags.intersection([.command, .option, .shift, .control])
-        if modifiers.isEmpty || HotkeyChord.isModifierOnly(event.keyCode) {
+        let modifiers = NSEvent.ModifierFlags(rawValue: modifierRaw).intersection([.command, .option, .shift, .control])
+        if modifiers.isEmpty || HotkeyChord.isModifierOnly(keyCode) {
             NSSound.beep()
-            return nil
+            return true
         }
-        let chord = HotkeyChord(keyCode: event.keyCode, modifiers: modifiers.rawValue)
+        let chord = HotkeyChord(keyCode: keyCode, modifiers: modifiers.rawValue)
         onCapture?(chord)
         stop()
-        return nil
+        return true
     }
 }

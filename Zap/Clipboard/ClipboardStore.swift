@@ -123,10 +123,29 @@ final class ClipboardStore: ObservableObject {
         save()
     }
 
+    func delete(_ id: UUID) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        let removed = items.remove(at: index)
+        deleteFiles(for: [removed])
+        save()
+    }
+
+    func togglePin(_ id: UUID) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        if items[index].pinnedAt == nil {
+            items[index].pinnedAt = Date()
+        } else {
+            items[index].pinnedAt = nil
+        }
+        save()
+    }
+
     func ranked(matching query: String) -> [RankedClip] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            return items.map { RankedClip(item: $0, match: FuzzyMatch(score: 0, indices: [])) }
+            return ClipboardHistory.sortedForDisplay(items).map {
+                RankedClip(item: $0, match: FuzzyMatch(score: 0, indices: []))
+            }
         }
         return items.compactMap { item in
             guard let match = FuzzyMatcher.match(query: trimmed, candidate: item.searchableText) else { return nil }
@@ -134,6 +153,9 @@ final class ClipboardStore: ObservableObject {
         }
         .sorted { lhs, rhs in
             if lhs.match.score != rhs.match.score { return lhs.match.score > rhs.match.score }
+            if (lhs.item.pinnedAt != nil) != (rhs.item.pinnedAt != nil) {
+                return lhs.item.pinnedAt != nil
+            }
             return lhs.item.createdAt > rhs.item.createdAt
         }
     }

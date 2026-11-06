@@ -17,7 +17,7 @@ final class FrontmostTracker: NSObject {
             object: nil,
             queue: .main
         ) { _ in
-            MainThread.run {
+            MainActor.assumeIsolated {
                 FrontmostTracker.shared.capture()
             }
         }
