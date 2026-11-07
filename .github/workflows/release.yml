@@ -1,8 +1,10 @@
-# 给公开仓库发布可下载的 Zap.app，并更新 Sparkle 的 appcast。
+# 给公开仓库发布 Apple 芯片和 Intel 两份 Zap.app，并更新 Sparkle 的 appcast。
 #
-# 触发：推送三段版本 tag（v1.0.0），或在该 tag 上手动运行。
+# 触发：推送三段版本 tag（v1.0.1），或在该 tag 上手动运行。不要强推已经发出的 tag。
 # 默认不签名、不公证。本机第一次打开可能被 Gatekeeper 拦住，Control-点按后选「打开」。
 # 三个 Apple secret 都存在时，才改用 Developer ID 签名。公证不在这个工作流里。
+# Sparkle 2.10.1 不会在同一个 generate_appcast 里接受同一版本的两份安装包。
+# 每种架构单独签名进自己的 feed；已安装的通用包仍读取合并后的 appcast.xml。
 name: Release
 
 on:
@@ -85,17 +87,14 @@ jobs:
           security default-keychain -s "$KEYCHAIN"
           rm -f "$CERT_PATH"
 
-      - name: 构建 Zap.app
+      - name: 分别构建 Apple 芯片和 Intel
         env:
           SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           set -euo pipefail
-          PLIST="$RUNNER_TEMP/Sparkle-Info.plist"
-          cp Config/Sparkle-Info.plist "$PLIST"
-          /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string ${SPARKLE_PUBLIC_KEY}" "$PLIST"
-
+          VERSION="${{ steps.version.outputs.version }}"
           SIGN_ARGS=(
             CODE_SIGNING_ALLOWED=NO
             CODE_SIGNING_REQUIRED=NO
@@ -115,26 +114,44 @@ jobs:
             fi
           fi
 
-          xcodebuild \
-            -project Zap.xcodeproj \
-            -scheme Zap \
-            -configuration Release \
-            -destination "generic/platform=macOS" \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            ARCHS="arm64 x86_64" \
-            ONLY_ACTIVE_ARCH=NO \
-            MARKETING_VERSION="${{ steps.version.outputs.version }}" \
-            CURRENT_PROJECT_VERSION="${{ steps.version.outputs.version }}" \
-            INFOPLIST_FILE="$PLIST" \
-            "${SIGN_ARGS[@]}"
+          build_one() {
+            local arch="$1"
+            local slug="$2"
+            local feed="appcast-${slug}.xml"
+            local plist="$RUNNER_TEMP/Sparkle-Info-${slug}.plist"
+            local derived="$RUNNER_TEMP/DerivedData-${slug}"
+            cp Config/Sparkle-Info.plist "$plist"
+            /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string ${SPARKLE_PUBLIC_KEY}" "$plist"
+            /usr/libexec/PlistBuddy -c "Set :SUFeedURL https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/${feed}" "$plist"
 
-          APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/Zap.app"
-          INFO="$APP/Contents/Info.plist"
-          test -d "$APP"
-          test "$(plutil -extract CFBundleShortVersionString raw -o - "$INFO")" = "${{ steps.version.outputs.version }}"
-          test "$(plutil -extract CFBundleVersion raw -o - "$INFO")" = "${{ steps.version.outputs.version }}"
-          test "$(plutil -extract SUPublicEDKey raw -o - "$INFO")" = "${SPARKLE_PUBLIC_KEY}"
-          test "$(plutil -extract SUFeedURL raw -o - "$INFO")" = "https://github.com/Aniu456/Zap/releases/latest/download/appcast.xml"
+            xcodebuild \
+              -project Zap.xcodeproj \
+              -scheme Zap \
+              -configuration Release \
+              -destination "generic/platform=macOS" \
+              -derivedDataPath "$derived" \
+              ARCHS="$arch" \
+              ONLY_ACTIVE_ARCH=NO \
+              MARKETING_VERSION="$VERSION" \
+              CURRENT_PROJECT_VERSION="$VERSION" \
+              INFOPLIST_FILE="$plist" \
+              "${SIGN_ARGS[@]}"
+
+            local app="$derived/Build/Products/Release/Zap.app"
+            local info="$app/Contents/Info.plist"
+            test -d "$app"
+            test "$(plutil -extract CFBundleShortVersionString raw -o - "$info")" = "$VERSION"
+            test "$(plutil -extract CFBundleVersion raw -o - "$info")" = "$VERSION"
+            test "$(plutil -extract SUPublicEDKey raw -o - "$info")" = "${SPARKLE_PUBLIC_KEY}"
+            test "$(plutil -extract SUFeedURL raw -o - "$info")" = "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/${feed}"
+            test "$(lipo -archs "$app/Contents/MacOS/Zap")" = "$arch"
+            mkdir -p "$RUNNER_TEMP/apps/${slug}"
+            rm -rf "$RUNNER_TEMP/apps/${slug}/Zap.app"
+            ditto "$app" "$RUNNER_TEMP/apps/${slug}/Zap.app"
+          }
+
+          build_one arm64 apple-silicon
+          build_one x86_64 intel
 
       - name: 打包并生成 appcast
         env:
@@ -143,11 +160,9 @@ jobs:
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           TAG="${{ steps.version.outputs.tag }}"
-          APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/Zap.app"
-          ARCHIVES="$RUNNER_TEMP/archives"
           KEY_FILE="$RUNNER_TEMP/sparkle_ed_private_key"
           export KEY_FILE
-          mkdir -p "$ARCHIVES" dist
+          mkdir -p dist
           umask 077
           cleanup() { rm -f "$KEY_FILE"; }
           trap cleanup EXIT
@@ -167,41 +182,95 @@ jobs:
           test -n "$GEN"
           chmod +x "$GEN"
 
-          ditto -c -k --sequesterRsrc --keepParent "$APP" "$ARCHIVES/Zap-${VERSION}.zip"
-          cat > "$ARCHIVES/Zap-${VERSION}.html" << EOF
+          # 每种架构单独跑 generate_appcast。同一版本的两份 zip 放进同一目录会被
+          # Sparkle 2.10.1 当成重复更新而拒绝。arm64 可执行文件会自动写入
+          # sparkle:hardwareRequirements。
+          sign_one() {
+            local slug="$1"
+            local work="$RUNNER_TEMP/archives-${slug}"
+            local zip="Zap-${VERSION}-${slug}.zip"
+            mkdir -p "$work"
+            ditto -c -k --sequesterRsrc --keepParent \
+              "$RUNNER_TEMP/apps/${slug}/Zap.app" "$work/${zip}"
+            cat > "$work/Zap-${VERSION}-${slug}.html" << EOF
           <h2>一闪 ${VERSION}</h2>
           <p>启动器、剪贴板历史，以及带标注和置顶的区域截图。历史只留在本机。</p>
           EOF
+            "$GEN" \
+              --ed-key-file "$KEY_FILE" \
+              --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/" \
+              --link "https://github.com/${GITHUB_REPOSITORY}" \
+              --embed-release-notes \
+              --maximum-deltas 0 \
+              --maximum-versions 0 \
+              --disable-nested-code-check \
+              -o "$RUNNER_TEMP/appcast-new-${slug}.xml" \
+              "$work"
+            cp "$work/${zip}" "dist/${zip}"
+          }
 
-          # 未签名的包不做增量包。Sparkle 仍校验整包的 EdDSA 签名。
-          "$GEN" \
-            --ed-key-file "$KEY_FILE" \
-            --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/" \
-            --link "https://github.com/${GITHUB_REPOSITORY}" \
-            --embed-release-notes \
-            --maximum-deltas 0 \
-            --maximum-versions 0 \
-            --disable-nested-code-check \
-            -o "$RUNNER_TEMP/appcast-new.xml" \
-            "$ARCHIVES"
+          sign_one apple-silicon
+          sign_one intel
 
-          PREV="$RUNNER_TEMP/appcast-previous.xml"
-          status=$(curl --silent --show-error --location --retry 3 --retry-all-errors \
-            --connect-timeout 10 --max-time 60 --output "$PREV" --write-out '%{http_code}' \
-            "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/appcast.xml")
-          case "$status" in
-            200) ;;
-            404) rm -f "$PREV" ;;
-            *) echo "读取旧 appcast 失败 (HTTP $status)" >&2; exit 1 ;;
-          esac
+          fetch_feed() {
+            local name="$1"
+            local dest="$2"
+            local status
+            status=$(curl --silent --show-error --location --retry 3 --retry-all-errors \
+              --connect-timeout 10 --max-time 60 --output "$dest" --write-out '%{http_code}' \
+              "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/${name}")
+            case "$status" in
+              200) ;;
+              404) rm -f "$dest" ;;
+              *) echo "读取旧 ${name} 失败 (HTTP $status)" >&2; exit 1 ;;
+            esac
+          }
+
+          fetch_feed appcast-apple-silicon.xml "$RUNNER_TEMP/appcast-previous-apple-silicon.xml"
+          fetch_feed appcast-intel.xml "$RUNNER_TEMP/appcast-previous-intel.xml"
+          fetch_feed appcast.xml "$RUNNER_TEMP/appcast-previous.xml"
+
           python3 scripts/merge_appcast.py \
-            "$RUNNER_TEMP/appcast-new.xml" \
-            "$PREV" \
+            "$RUNNER_TEMP/appcast-new-apple-silicon.xml" \
+            "$RUNNER_TEMP/appcast-previous-apple-silicon.xml" \
+            dist/appcast-apple-silicon.xml
+          python3 scripts/merge_appcast.py \
+            "$RUNNER_TEMP/appcast-new-intel.xml" \
+            "$RUNNER_TEMP/appcast-previous-intel.xml" \
+            dist/appcast-intel.xml
+          python3 scripts/merge_appcast.py combine \
+            "$RUNNER_TEMP/appcast-new-apple-silicon.xml" \
+            "$RUNNER_TEMP/appcast-new-intel.xml" \
+            "$RUNNER_TEMP/appcast-new-combined.xml"
+          python3 scripts/merge_appcast.py \
+            "$RUNNER_TEMP/appcast-new-combined.xml" \
+            "$RUNNER_TEMP/appcast-previous.xml" \
             dist/appcast.xml
-          cp "$ARCHIVES/Zap-${VERSION}.zip" "dist/Zap-${VERSION}.zip"
-          test -s dist/appcast.xml
+
+          grep -q "sparkle:edSignature=" dist/appcast-apple-silicon.xml
+          grep -q "sparkle:edSignature=" dist/appcast-intel.xml
           grep -q "sparkle:edSignature=" dist/appcast.xml
-          grep -q "Zap-${VERSION}.zip" dist/appcast.xml
+          VERSION="$VERSION" python3 - << 'PY'
+          import os
+          import re
+          from pathlib import Path
+          version = os.environ["VERSION"]
+          apple = Path("dist/appcast-apple-silicon.xml").read_text(encoding="utf-8")
+          intel = Path("dist/appcast-intel.xml").read_text(encoding="utf-8")
+          combined = Path("dist/appcast.xml").read_text(encoding="utf-8")
+          hardware = re.compile(r"<sparkle:hardwareRequirements>\s*([^<]*?)\s*</sparkle:hardwareRequirements>")
+          apple_requirements = hardware.findall(apple)
+          if not any("arm64" in value for value in apple_requirements):
+              raise SystemExit("Apple 芯片 appcast 缺少 sparkle:hardwareRequirements arm64")
+          if hardware.search(intel):
+              raise SystemExit("Intel appcast 不应声明 hardwareRequirements")
+          apple_zip = f"Zap-{version}-apple-silicon.zip"
+          intel_zip = f"Zap-{version}-intel.zip"
+          if apple_zip not in apple or intel_zip not in intel:
+              raise SystemExit("appcast 里没有对应架构的 zip")
+          if combined.index(apple_zip) > combined.index(intel_zip):
+              raise SystemExit("appcast.xml 里 Apple 芯片条目必须排在 Intel 前面")
+          PY
           cleanup
 
       - name: 写发布说明
@@ -211,11 +280,13 @@ jobs:
           cat > release-notes.md << EOF
           ## 一闪 ${VERSION}
 
-          下载 \`Zap-${VERSION}.zip\`，解压后把「Zap.app」放进「应用程序」文件夹。界面显示名是「一闪」。
+          按这台 Mac 的芯片下载一份。M 系列（Apple 芯片）用 \`Zap-${VERSION}-apple-silicon.zip\`。Intel Mac 用 \`Zap-${VERSION}-intel.zip\`。
+
+          解压后把「Zap.app」放进「应用程序」文件夹。界面显示名是「一闪」。
 
           这次构建默认没有 Apple 公证。第一次打开如果系统拦截：在访达里按住 Control 点按应用，选择「打开」。
 
-          装上带公钥的正式包之后，菜单栏或设置里的「检查更新…」会读取本页附件里的 \`appcast.xml\`。
+          Apple 芯片的安装包检查 \`appcast-apple-silicon.xml\`，Intel 的安装包检查 \`appcast-intel.xml\`。已经装过通用包的旧版本仍读取 \`appcast.xml\`，其中会按芯片提供对应的安装包。
           EOF
 
       - name: 发布到 GitHub Releases
@@ -225,6 +296,9 @@ jobs:
           name: 一闪 ${{ steps.version.outputs.version }}
           body_path: release-notes.md
           files: |
-            dist/Zap-${{ steps.version.outputs.version }}.zip
+            dist/Zap-${{ steps.version.outputs.version }}-apple-silicon.zip
+            dist/Zap-${{ steps.version.outputs.version }}-intel.zip
+            dist/appcast-apple-silicon.xml
+            dist/appcast-intel.xml
             dist/appcast.xml
           make_latest: true

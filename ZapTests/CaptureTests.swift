@@ -314,6 +314,30 @@ final class CaptureRendererOrientationTests: XCTestCase {
     }
 }
 
+final class CaptureCopyNoticeTests: XCTestCase {
+    func testSuccessfulCopyStaysSilent() {
+        XCTAssertNil(CaptureCopyNotice.message(storedInHistory: true))
+    }
+
+    func testHistoryRejectionDoesNotAnnounceTheCopy() {
+        let message = CaptureCopyNotice.message(storedInHistory: false)
+        XCTAssertEqual(message, L10n.captureTooLarge)
+        XCTAssertEqual(message, "这张图超过 8 MB，没有写入历史")
+        for phrase in ["已复制", "剪贴板", "剪切板", "copied", "clipboard"] {
+            XCTAssertFalse(message?.localizedCaseInsensitiveContains(phrase) ?? true)
+        }
+    }
+
+    func testFailureAndPermissionToastsStay() {
+        XCTAssertFalse(L10n.captureFailed.isEmpty)
+        XCTAssertFalse(L10n.captureRenderFailed.isEmpty)
+        XCTAssertFalse(L10n.captureSaveFailed.isEmpty)
+        XCTAssertFalse(L10n.captureSaved.isEmpty)
+        XCTAssertFalse(L10n.screenRecordingNeeded.isEmpty)
+        XCTAssertFalse(L10n.pasteFallback.isEmpty)
+    }
+}
+
 final class PixelSampleTests: XCTestCase {
     func testSamplingScaledImageAndFormattingFlutterAlpha() throws {
         // Top-left pixel is half-transparent red. Bottom-left is opaque green.

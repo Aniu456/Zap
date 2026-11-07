@@ -60,14 +60,23 @@ final class ToastCenter {
 
 private struct ToastView: View {
     let message: String
+    @ObservedObject private var themes = ThemeController.shared
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
+        let colors = themes.colors(dark: colorScheme == .dark)
         Text(message)
             .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(.primary)
+            .foregroundStyle(colors.primary)
             .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
+            .background {
+                if colors.vibrancy > 0.5 {
+                    Capsule().fill(.regularMaterial)
+                } else {
+                    Capsule().fill(colors.background)
+                }
+            }
+            .overlay(Capsule().strokeBorder(colors.separator, lineWidth: 1))
     }
 }

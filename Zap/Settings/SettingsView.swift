@@ -7,26 +7,64 @@ struct SettingsView: View {
     @ObservedObject private var access = AccessibilityPermission.shared
     @ObservedObject private var screenRecording = ScreenRecordingPermission.shared
     @ObservedObject private var clipboard = ClipboardStore.shared
+    @ObservedObject private var themes = ThemeController.shared
+    @Environment(\.colorScheme) private var colorScheme
     @State private var confirmClear = false
 
     var body: some View {
         Form {
             Section {
                 HStack(spacing: 12) {
-                    Image(nsImage: NSApp.applicationIconImage)
+                    Image(nsImage: AppIconArtwork.image())
                         .resizable()
+                        .interpolation(.high)
                         .frame(width: 48, height: 48)
+                        .clipShape(RoundedRectangle(cornerRadius: CGFloat(48) * 0.225, style: .continuous))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(L10n.appName)
                             .font(.title2.bold())
-                        Text("Zap · \(L10n.tagline)")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(colors.primary)
+                        Text(versionSubtitle)
+                            .foregroundStyle(colors.secondary)
                     }
                 }
                 .padding(.vertical, 4)
-                Text(L10n.laterCapture)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(L10n.aboutIntro)
+                    Text(L10n.aboutLauncher)
+                    Text(L10n.aboutClipboard)
+                    Text(L10n.aboutCapture)
+                    Text(L10n.aboutPrivacy)
+                }
+                .font(.callout)
+                .foregroundStyle(colors.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(L10n.aboutCopyright)
+                    .font(.caption)
+                    .foregroundStyle(colors.secondary)
+                HStack {
+                    Button(L10n.checkForUpdates) {
+                        (NSApp.delegate as? AppDelegate)?.checkForUpdates(nil)
+                    }
+                    if let github = URL(string: L10n.githubURL) {
+                        Link(L10n.github, destination: github)
+                    }
+                }
+            }
+
+            Section {
+                Picker(L10n.appearance, selection: themeSelection) {
+                    ForEach(ZapTheme.allCases) { theme in
+                        Text(theme.title).tag(theme)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                Text(L10n.themeHelp)
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(colors.secondary)
+            } header: {
+                Text(L10n.appearance)
             }
 
             Section {
@@ -135,9 +173,6 @@ struct SettingsView: View {
             }
 
             Section {
-                Text(versionText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 Text(L10n.updatesHelp)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -150,6 +185,9 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 560)
+        .tint(colors.accent)
+        .scrollContentBackground(colors.vibrancy > 0.5 ? .visible : .hidden)
+        .background(colors.background.opacity(colors.cover))
         .environment(\.locale, Locale(identifier: "zh-Hans-SG"))
         .alert(L10n.clearTitle, isPresented: $confirmClear) {
             Button(L10n.clearConfirm, role: .destructive) {
@@ -169,10 +207,22 @@ struct SettingsView: View {
         }
     }
 
-    private var versionText: String {
-        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
-        return "版本 \(short) (\(build))"
+    private var colors: ZapColors {
+        themes.colors(dark: colorScheme == .dark)
+    }
+
+    private var themeSelection: Binding<ZapTheme> {
+        Binding(
+            get: { themes.theme },
+            set: { themes.setTheme($0) }
+        )
+    }
+
+    private var versionSubtitle: String {
+        AppVersion.subtitle(
+            short: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+            build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        )
     }
 }
 

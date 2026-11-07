@@ -4,7 +4,6 @@ import Foundation
 /// switch language with the system: every user-facing string lives here.
 enum L10n {
     static let appName = "一闪"
-    static let tagline = "菜单栏效率工具"
     static let aboutMenu = "关于一闪"
     static let settings = "设置…"
     static let quit = "退出一闪"
@@ -91,7 +90,18 @@ enum L10n {
 
     static let pasteFallback = "已放回剪贴板，按 ⌘V 粘贴"
     static let launchFailed = "无法打开此应用"
-    static let laterCapture = "区域截图可以画方框、箭头、铅笔、记号笔、马赛克和文字，然后复制、保存或置顶在其他窗口上。"
+    static let aboutIntro = "一闪住在菜单栏里，用快捷键唤起这三件事。"
+    static let aboutLauncher = "启动器：搜索并打开本机应用，允许漏字和少量错字。"
+    static let aboutClipboard = "剪贴板历史：浏览、搜索复制过的文本和图片，并粘贴到当前最前面的应用。"
+    static let aboutCapture = "区域截图：框选画面，画箭头、方框、铅笔、记号笔、马赛克和文字，然后复制、保存，或置顶成贴图。"
+    static let aboutPrivacy = "剪贴板、截图和搜索都留在这台 Mac 上，不会上传。"
+    static let aboutCopyright = "© 2026 Benny · MIT"
+    static let appearance = "外观"
+    static let themeMuse = "Muse"
+    static let themeSpotlight = "系统聚焦"
+    static let themeHelp = "Muse 是近白或近黑的底，配同一支蓝色。系统聚焦用 macOS 的毛玻璃和系统选中色。两种都会跟着系统的浅色、深色走。"
+    static let github = "GitHub"
+    static let githubURL = "https://github.com/Aniu456/Zap"
 
     static let toolArrow = "箭头"
     static let toolBox = "方框"
@@ -109,8 +119,7 @@ enum L10n {
     static let captureSelectHint = "拖拽选择区域，Esc 取消"
     static let captureEditHint = "⌘Z 撤销   ⌘⇧Z 重做   ⌘S 保存   ↩ 复制   ⌘P 置顶   Esc 取消"
     static let captureCaption = "截图"
-    static let captureCopied = "已复制到剪贴板"
-    static let captureTooLarge = "已复制。这张图超过 8 MB，没有写入历史"
+    static let captureTooLarge = "这张图超过 8 MB，没有写入历史"
     static let captureRenderFailed = "标注渲染失败，请重试"
     static let captureFailed = "没有截到屏幕"
     static let captureSaved = "已保存"
