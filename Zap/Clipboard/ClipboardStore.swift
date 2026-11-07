@@ -22,14 +22,47 @@ final class ClipboardStore: ObservableObject {
         thumbnails.countLimit = 40
     }
 
+    /// Store rooted at `directory`, for tests. The app uses `shared`.
+    init(testingDirectory directory: URL) {
+        self.directory = directory
+        thumbnails.countLimit = 40
+    }
+
+    /// Sum of each item's `byteCount`. Not a directory walk, and not the thumbnail cache.
+    var totalByteCount: Int {
+        ClipboardHistory.totalBytes(items)
+    }
+
+    var limitWarning: ClipboardLimitWarning? {
+        ClipboardHistory.limitWarning(for: items)
+    }
+
+    var usageLine: String {
+        DiskUsageFormat.historyLine(bytes: totalByteCount, count: items.count)
+    }
+
     func load() {
         do {
             let directory = try Self.prepareDirectories()
-            self.directory = directory
-            let url = directory.appendingPathComponent("history.json")
-            guard FileManager.default.fileExists(atPath: url.path) else { return }
+            load(from: directory)
+        } catch {
+            items = []
+        }
+    }
+
+    /// Reads `history.json`, then drops oldest unpinned rows that exceed either cap and saves.
+    func load(from directory: URL) {
+        self.directory = directory
+        let url = directory.appendingPathComponent("history.json")
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
             let data = try Data(contentsOf: url)
-            items = try JSONDecoder().decode([ClipboardItem].self, from: data)
+            let decoded = try JSONDecoder().decode([ClipboardItem].self, from: data)
+            let update = ClipboardHistory.applyingLimits(decoded)
+            items = update.items
+            guard !update.removed.isEmpty else { return }
+            deleteFiles(for: update.removed)
+            save()
         } catch {
             items = []
         }
@@ -209,7 +242,12 @@ final class ClipboardStore: ObservableObject {
     }
 
     private func apply(_ item: ClipboardItem) {
-        let update = ClipboardHistory.inserting(item, into: items, limit: ClipboardPolicy.maxItems)
+        let update = ClipboardHistory.inserting(
+            item,
+            into: items,
+            limit: ClipboardPolicy.maxItems,
+            diskBudget: ClipboardPolicy.maxDiskBytes
+        )
         items = update.items
         deleteFiles(for: update.removed)
         save()

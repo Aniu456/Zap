@@ -66,7 +66,23 @@ enum L10n {
     static let hotkeyRejected = "系统没有接受这个快捷键，它可能已被占用"
 
     static let clipboardSection = "剪贴板"
-    static let clipboardLimit = "最多保留 200 条。置顶的记录留在最前面，也不会被这条上限自动清掉；可以只删除一条。超过约 20 万字的文本，以及大于 8 MB 的图片不会记入。标记为密码或临时内容的剪贴板会被跳过。"
+    static let diskUsage = "磁盘占用"
+    static let clipboardLimit = "最多保留 200 条，磁盘占用不超过 256 MB，两项同时生效。放不下时会先删掉最早、且没有置顶的记录。置顶会计入条数和占用，但不会被自动删除。可以只删除一条。超过约 20 万字的文本，以及大于 8 MB 的图片不会记入。标记为密码或临时内容的剪贴板会被跳过。"
+    static let pinnedOverDisk = "置顶内容已超过磁盘预算，不会自动删除。"
+    static let pinnedOverCount = "置顶内容已超过条数上限，不会自动删除。"
+    static let pinnedOverDiskAndCount = "置顶内容已超过磁盘预算和条数上限，不会自动删除。"
+
+    static func clipboardLimitWarning(_ warning: ClipboardLimitWarning) -> String {
+        switch warning {
+        case .pinnedOverDisk:
+            return pinnedOverDisk
+        case .pinnedOverCount:
+            return pinnedOverCount
+        case .pinnedOverDiskAndCount:
+            return pinnedOverDiskAndCount
+        }
+    }
+
     static let clearHistory = "清空历史"
     static let clearTitle = "清空剪贴板历史？"
     static let clearMessage = "本机保存的文本和图片记录会被删除。此操作无法撤销。"

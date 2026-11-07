@@ -113,6 +113,16 @@ struct SettingsView: View {
             }
 
             Section {
+                LabeledContent(L10n.diskUsage) {
+                    Text(clipboard.usageLine)
+                        .monospacedDigit()
+                        .foregroundStyle(clipboard.limitWarning == nil ? Color.primary : Color.orange)
+                }
+                if let warning = clipboard.limitWarning {
+                    Text(L10n.clipboardLimitWarning(warning))
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                }
                 Text(L10n.clipboardLimit)
                     .font(.callout)
                     .foregroundStyle(.secondary)

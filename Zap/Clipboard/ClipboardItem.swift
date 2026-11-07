@@ -13,7 +13,7 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     var contentHash: String
     var createdAt: Date
     var byteCount: Int
-    /// Set while the item is pinned. Pinned rows stay at the top and are not trimmed first.
+    /// Set while the item is pinned. Pinned rows stay at the top and are never auto-deleted.
     var pinnedAt: Date? = nil
 
     /// Single-line text used both for search and for the row title.
@@ -42,9 +42,22 @@ struct HistoryUpdate {
     var removed: [ClipboardItem]
 }
 
+enum ClipboardLimitWarning: Equatable {
+    case pinnedOverDisk
+    case pinnedOverCount
+    case pinnedOverDiskAndCount
+}
+
 enum ClipboardHistory {
     /// Newest item stays at index 0. An identical hash moves to the front instead of duplicating.
-    static func inserting(_ item: ClipboardItem, into items: [ClipboardItem], limit: Int) -> HistoryUpdate {
+    /// Both the item-count cap and the disk budget apply. Oldest unpinned rows go first.
+    /// Pinned rows are never removed; if they alone still exceed a cap, they stay.
+    static func inserting(
+        _ item: ClipboardItem,
+        into items: [ClipboardItem],
+        limit: Int,
+        diskBudget: Int = ClipboardPolicy.maxDiskBytes
+    ) -> HistoryUpdate {
         var next = items
         if let index = next.firstIndex(where: { $0.kind == item.kind && $0.contentHash == item.contentHash }) {
             var existing = next.remove(at: index)
@@ -53,18 +66,42 @@ enum ClipboardHistory {
         } else {
             next.insert(item, at: 0)
         }
+        return applyingLimits(next, limit: limit, diskBudget: diskBudget)
+    }
+
+    /// Drops the oldest unpinned items until both caps hold. Storage order is newest-first,
+    /// so the oldest unpinned row is the last one in the array.
+    static func applyingLimits(
+        _ items: [ClipboardItem],
+        limit: Int = ClipboardPolicy.maxItems,
+        diskBudget: Int = ClipboardPolicy.maxDiskBytes
+    ) -> HistoryUpdate {
+        var next = items
         var removed: [ClipboardItem] = []
-        while next.count > limit {
-            // Drop the oldest unpinned row. Pinned rows stay until the user unpins or deletes them.
-            if let index = next.lastIndex(where: { $0.pinnedAt == nil }) {
-                removed.append(next.remove(at: index))
-            } else if !next.isEmpty {
-                removed.append(next.removeLast())
-            } else {
-                break
-            }
+        while next.count > limit || totalBytes(next) > diskBudget {
+            guard let index = next.lastIndex(where: { $0.pinnedAt == nil }) else { break }
+            removed.append(next.remove(at: index))
         }
         return HistoryUpdate(items: next, removed: removed)
+    }
+
+    static func totalBytes(_ items: [ClipboardItem]) -> Int {
+        items.reduce(0) { $0 + max(0, $1.byteCount) }
+    }
+
+    /// Non-nil only when every remaining row is pinned and a cap is still exceeded.
+    static func limitWarning(
+        for items: [ClipboardItem],
+        limit: Int = ClipboardPolicy.maxItems,
+        diskBudget: Int = ClipboardPolicy.maxDiskBytes
+    ) -> ClipboardLimitWarning? {
+        let overDisk = totalBytes(items) > diskBudget
+        let overCount = items.count > limit
+        guard overDisk || overCount else { return nil }
+        guard !items.contains(where: { $0.pinnedAt == nil }) else { return nil }
+        if overDisk && overCount { return .pinnedOverDiskAndCount }
+        if overDisk { return .pinnedOverDisk }
+        return .pinnedOverCount
     }
 
     /// Pinned items first (most recently pinned), then everything else newest first.
