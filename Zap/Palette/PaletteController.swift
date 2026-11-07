@@ -306,35 +306,15 @@ final class PaletteController: ObservableObject {
     }
 }
 
-/// Popover vibrancy, kept active so a borderless panel does not fall back to a
-/// thin blur of the desktop. The yellow accent wash used to sit on top of that.
-final class PaletteChrome: NSVisualEffectView {
+final class PaletteChrome: NSView {
+    static let radius: CGFloat = 16
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        material = .popover
-        blendingMode = .behindWindow
-        state = .active
-        isEmphasized = true
         wantsLayer = true
-        layer?.cornerRadius = 16
+        layer?.cornerRadius = Self.radius
+        layer?.cornerCurve = .continuous
         layer?.masksToBounds = true
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(refreshTheme),
-            name: .zapThemeChanged,
-            object: nil
-        )
-        refreshTheme()
-    }
-
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
-
-    @objc private func refreshTheme() {
-        let amount = ThemeController.shared.vibrancyAmount()
-        state = amount > 0.02 ? .active : .inactive
-        isEmphasized = amount > 0.5
     }
 
     @available(*, unavailable)

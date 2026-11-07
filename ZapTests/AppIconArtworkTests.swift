@@ -29,7 +29,7 @@ final class AppIconArtworkTests: XCTestCase {
     @MainActor
     func testInstallReplacesTheAccessoryPlaceholder() throws {
         AppIconArtwork.install()
-        let installed = NSApp.applicationIconImage
+        let installed = try XCTUnwrap(NSApp.applicationIconImage)
         let rep = try XCTUnwrap(bitmap(of: installed))
         let center = try components(try XCTUnwrap(rep.colorAt(x: rep.pixelsWide / 2, y: rep.pixelsHigh / 2)))
         XCTAssertGreaterThan(center.r, 0.75)
@@ -51,7 +51,7 @@ final class AppIconArtworkTests: XCTestCase {
         var g: CGFloat = 0
         var b: CGFloat = 0
         var a: CGFloat = 0
-        XCTAssertTrue(rgb.getRed(&r, green: &g, blue: &b, alpha: &a))
+        rgb.getRed(&r, green: &g, blue: &b, alpha: &a)
         return (r, g, b, a)
     }
 }

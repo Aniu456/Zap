@@ -7,7 +7,6 @@ struct PaletteView: View {
     @ObservedObject private var clipboard = ClipboardStore.shared
     @ObservedObject private var access = AccessibilityPermission.shared
     @ObservedObject private var settings = SettingsStore.shared
-    @ObservedObject private var themes = ThemeController.shared
     @FocusState private var fieldFocused: Bool
     @Environment(\.displayScale) private var displayScale
     @Environment(\.colorScheme) private var colorScheme
@@ -27,9 +26,9 @@ struct PaletteView: View {
             footer
         }
         .frame(width: 640, height: 480)
-        .background(colors.background.opacity(colors.cover))
+        .background(colors.background)
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: PaletteChrome.radius, style: .continuous)
                 .strokeBorder(colors.separator, lineWidth: 1)
         )
         .onAppear { focusField() }
@@ -54,18 +53,6 @@ struct PaletteView: View {
                 .focused($fieldFocused)
                 .autocorrectionDisabled()
                 .id(palette.fieldToken)
-                .padding(.horizontal, colors.searchIsPill ? 12 : 0)
-                .padding(.vertical, colors.searchIsPill ? 6 : 0)
-                .background {
-                    if colors.searchIsPill {
-                        Capsule().fill(colors.inputFill)
-                    }
-                }
-                .overlay {
-                    if colors.searchIsPill {
-                        Capsule().strokeBorder(fieldFocused ? colors.accent : colors.inputStroke, lineWidth: fieldFocused ? 1.5 : 1)
-                    }
-                }
             if !palette.query.isEmpty {
                 Button {
                     palette.query = ""
@@ -419,7 +406,7 @@ struct PaletteView: View {
     }
 
     private var colors: ZapColors {
-        themes.colors(dark: colorScheme == .dark)
+        ZapSwatch.colors(dark: colorScheme == .dark)
     }
 
     private func rowFill(selected: Bool) -> some View {

@@ -7,7 +7,6 @@ struct SettingsView: View {
     @ObservedObject private var access = AccessibilityPermission.shared
     @ObservedObject private var screenRecording = ScreenRecordingPermission.shared
     @ObservedObject private var clipboard = ClipboardStore.shared
-    @ObservedObject private var themes = ThemeController.shared
     @Environment(\.colorScheme) private var colorScheme
     @State private var confirmClear = false
 
@@ -50,21 +49,6 @@ struct SettingsView: View {
                         Link(L10n.github, destination: github)
                     }
                 }
-            }
-
-            Section {
-                Picker(L10n.appearance, selection: themeSelection) {
-                    ForEach(ZapTheme.allCases) { theme in
-                        Text(theme.title).tag(theme)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                Text(L10n.themeHelp)
-                    .font(.callout)
-                    .foregroundStyle(colors.secondary)
-            } header: {
-                Text(L10n.appearance)
             }
 
             Section {
@@ -186,8 +170,8 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 560)
         .tint(colors.accent)
-        .scrollContentBackground(colors.vibrancy > 0.5 ? .visible : .hidden)
-        .background(colors.background.opacity(colors.cover))
+        .scrollContentBackground(.hidden)
+        .background(colors.background)
         .environment(\.locale, Locale(identifier: "zh-Hans-SG"))
         .alert(L10n.clearTitle, isPresented: $confirmClear) {
             Button(L10n.clearConfirm, role: .destructive) {
@@ -208,14 +192,7 @@ struct SettingsView: View {
     }
 
     private var colors: ZapColors {
-        themes.colors(dark: colorScheme == .dark)
-    }
-
-    private var themeSelection: Binding<ZapTheme> {
-        Binding(
-            get: { themes.theme },
-            set: { themes.setTheme($0) }
-        )
+        ZapSwatch.colors(dark: colorScheme == .dark)
     }
 
     private var versionSubtitle: String {

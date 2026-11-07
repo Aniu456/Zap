@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import Zap
 
@@ -19,31 +20,33 @@ final class ZapThemeTests: XCTestCase {
             XCTAssertFalse(ZapSwatch.muse(.background, dark: dark).isYellow)
         }
     }
+}
 
-    func testBlendStaysOnTheEndpoints() {
-        let light = ZapSwatch.muse(.primary, dark: false)
-        let dark = ZapSwatch.muse(.primary, dark: true)
-        XCTAssertEqual(light.mixed(with: dark, 0).r, light.r, accuracy: 0.0001)
-        XCTAssertEqual(light.mixed(with: dark, 1).r, dark.r, accuracy: 0.0001)
-        let mid = light.mixed(with: dark, 0.5)
-        XCTAssertGreaterThan(mid.r, dark.r)
-        XCTAssertLessThan(mid.r, light.r)
-    }
-
-    @MainActor
-    func testChoicePersistsAndSkipsTheTransitionWhenAsked() {
-        let defaults = UserDefaults(suiteName: "zap-theme-\(UUID().uuidString)")!
-        let controller = ThemeController(defaults: defaults)
-        XCTAssertEqual(controller.theme, .muse)
-        controller.setTheme(.spotlight, animated: false)
-        XCTAssertEqual(controller.theme, .spotlight)
-        XCTAssertNil(controller.blend)
-        XCTAssertEqual(controller.vibrancyAmount(), 1, accuracy: 0.001)
-        XCTAssertFalse(controller.colors(dark: true).searchIsPill)
-        controller.setTheme(.muse, animated: false)
-        XCTAssertEqual(controller.vibrancyAmount(), 0, accuracy: 0.001)
-        XCTAssertTrue(controller.colors(dark: false).searchIsPill)
-        let restored = ThemeController(defaults: defaults)
-        XCTAssertEqual(restored.theme, .muse)
+final class PaletteAppearanceTests: XCTestCase {
+    @MainActor func testMuseWindowCorners() async throws {
+        defer { PaletteController.shared.hide() }
+        for mode in [PaletteMode.launcher, .clipboard] {
+            PaletteController.shared.show(mode)
+            try await Task.sleep(for: .milliseconds(200))
+            let panel = try XCTUnwrap(NSApp.windows.first { $0 is PalettePanel })
+            let view = try XCTUnwrap(panel.contentView)
+            let layer = try XCTUnwrap(view.layer)
+            let scale = panel.backingScaleFactor
+            let width = Int(view.bounds.width * scale)
+            let height = Int(view.bounds.height * scale)
+            let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.scaleBy(x: scale, y: scale)
+            layer.render(in: context)
+            let image = try XCTUnwrap(context.makeImage())
+            let bitmap = NSBitmapImageRep(cgImage: image)
+            let alphas = [0, image.width - 1].flatMap { x in
+                [0, image.height - 1].compactMap { bitmap.colorAt(x: x, y: $0)?.alphaComponent }
+            }
+            XCTAssertEqual(alphas, [0, 0, 0, 0])
+            XCTAssertGreaterThan(try XCTUnwrap(bitmap.colorAt(x: image.width / 2, y: 10)).alphaComponent, 0.95)
+            XCTAssertTrue(panel.firstResponder is NSTextView)
+            PaletteController.shared.hide()
+        }
     }
 }

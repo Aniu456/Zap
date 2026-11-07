@@ -78,12 +78,6 @@ final class PinContentView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.borderWidth = 1
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(refreshTheme),
-            name: .zapThemeChanged,
-            object: nil
-        )
         refreshTheme()
         closeButton.isBordered = false
         closeButton.bezelStyle = .circular
@@ -108,10 +102,6 @@ final class PinContentView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
-
     override var acceptsFirstResponder: Bool { true }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -119,8 +109,8 @@ final class PinContentView: NSView {
         refreshTheme()
     }
 
-    @objc private func refreshTheme() {
-        let color = ThemeController.shared.nsColor(.separator, appearance: effectiveAppearance)
+    private func refreshTheme() {
+        let color = ZapSwatch.nsColor(.separator, appearance: effectiveAppearance)
         layer?.borderColor = color.cgColor
     }
 

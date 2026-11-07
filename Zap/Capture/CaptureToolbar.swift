@@ -27,12 +27,6 @@ final class CaptureToolbar: NSView {
         wantsLayer = true
         layer?.cornerRadius = 6
         layer?.borderWidth = 1
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(refreshTheme),
-            name: .zapThemeChanged,
-            object: nil
-        )
         layer?.shadowColor = NSColor.black.cgColor
         layer?.shadowOpacity = 0.16
         layer?.shadowRadius = 10
@@ -48,10 +42,6 @@ final class CaptureToolbar: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    deinit {
-        NotificationCenter.default.removeObserver(self)
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -70,11 +60,11 @@ final class CaptureToolbar: NSView {
         refreshTheme()
     }
 
-    @objc private func refreshTheme() {
+    private func refreshTheme() {
         let appearance = effectiveAppearance
-        layer?.backgroundColor = ThemeController.shared.nsColor(.chrome, appearance: appearance).cgColor
-        layer?.borderColor = ThemeController.shared.nsColor(.separator, appearance: appearance).cgColor
-        let ink = ThemeController.shared.nsColor(.primary, appearance: appearance)
+        layer?.backgroundColor = ZapSwatch.nsColor(.chrome, appearance: appearance).cgColor
+        layer?.borderColor = ZapSwatch.nsColor(.separator, appearance: appearance).cgColor
+        let ink = ZapSwatch.nsColor(.primary, appearance: appearance)
         for case let button as NSButton in subviews {
             button.contentTintColor = ink
             if button.identifier?.rawValue == "text" {
@@ -88,14 +78,14 @@ final class CaptureToolbar: NSView {
             }
         }
         for line in separators {
-            line.layer?.backgroundColor = ThemeController.shared.nsColor(.separator, appearance: appearance).cgColor
+            line.layer?.backgroundColor = ZapSwatch.nsColor(.separator, appearance: appearance).cgColor
         }
         styleSelectedTool()
         needsDisplay = true
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let ink = ThemeController.shared.nsColor(.secondary, appearance: effectiveAppearance)
+        let ink = ZapSwatch.nsColor(.secondary, appearance: effectiveAppearance)
         ink.setFill()
         let center = CGPoint(x: gripWidth / 2, y: bounds.midY)
         for row in -1...1 {
@@ -186,7 +176,7 @@ final class CaptureToolbar: NSView {
 
     private func style(_ button: NSButton, selected: Bool) {
         let fill = selected
-            ? ThemeController.shared.nsColor(.selection, appearance: effectiveAppearance)
+            ? ZapSwatch.nsColor(.selection, appearance: effectiveAppearance)
             : NSColor.clear
         button.layer?.backgroundColor = fill.cgColor
     }
