@@ -201,11 +201,16 @@ final class PaletteController: ObservableObject {
     private func ensurePanel() -> PalettePanel {
         if let panel { return panel }
         let panel = PalettePanel()
-        let host = NSHostingView(
+        let chrome = PaletteChrome(frame: NSRect(x: 0, y: 0, width: 640, height: 480))
+        chrome.autoresizingMask = [.width, .height]
+        let host = ClearHostingView(
             rootView: PaletteView()
                 .environment(\.locale, Locale(identifier: "zh-Hans-SG"))
         )
-        panel.contentView = host
+        host.frame = chrome.bounds
+        host.autoresizingMask = [.width, .height]
+        chrome.addSubview(host)
+        panel.contentView = chrome
         self.panel = panel
         return panel
     }
@@ -298,6 +303,41 @@ final class PaletteController: ObservableObject {
             NSEvent.removeMonitor(clickMonitor)
             self.clickMonitor = nil
         }
+    }
+}
+
+/// Popover vibrancy, kept active so a borderless panel does not fall back to a
+/// thin blur of the desktop. The yellow accent wash used to sit on top of that.
+final class PaletteChrome: NSVisualEffectView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        material = .popover
+        blendingMode = .behindWindow
+        state = .active
+        isEmphasized = true
+        wantsLayer = true
+        layer?.cornerRadius = 16
+        layer?.masksToBounds = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
+final class ClearHostingView<Content: View>: NSHostingView<Content> {
+    override var isOpaque: Bool { false }
+
+    override init(rootView: Content) {
+        super.init(rootView: rootView)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 }
 

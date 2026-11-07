@@ -9,11 +9,12 @@ struct PaletteView: View {
     @ObservedObject private var settings = SettingsStore.shared
     @FocusState private var fieldFocused: Bool
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(spacing: 0) {
             searchRow
-            Divider().opacity(0.35)
+            Divider()
             resultList
             if let warning = clipboard.limitWarning, palette.mode == .clipboard {
                 pinnedLimitBanner(L10n.clipboardLimitWarning(warning))
@@ -21,15 +22,14 @@ struct PaletteView: View {
             if palette.mode == .clipboard && !access.isTrusted {
                 permissionBanner
             }
+            Divider()
             footer
         }
         .frame(width: 640, height: 480)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onAppear { focusField() }
         .onChange(of: palette.isPresented) { _, shown in
             if shown { focusField() }
@@ -169,10 +169,7 @@ struct PaletteView: View {
             }
             .padding(.horizontal, 8)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(selected ? Color.accentColor.opacity(0.22) : Color.clear)
-            )
+            .background(rowFill(selected: selected))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -190,7 +187,7 @@ struct PaletteView: View {
                 HStack(spacing: 10) {
                     if selected && !palette.selectedClipIDs.isEmpty {
                         Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(Color.accentColor)
+                            .foregroundStyle(.primary)
                             .accessibilityHidden(true)
                     }
                     clipIcon(item)
@@ -200,7 +197,7 @@ struct PaletteView: View {
                     if item.pinnedAt != nil {
                         Image(systemName: "pin.fill")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Color.accentColor)
+                            .foregroundStyle(.primary)
                     }
                     if ClipboardPolicy.showsStoredSize(of: item) {
                         Text(DiskUsageFormat.bytes(item.byteCount))
@@ -240,10 +237,7 @@ struct PaletteView: View {
         }
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(selected ? Color.accentColor.opacity(0.22) : Color.clear)
-        )
+        .background(rowFill(selected: selected))
         .onHover { inside in
             if inside { palette.selectedIndex = index }
         }
@@ -353,7 +347,7 @@ struct PaletteView: View {
             Spacer()
             Text(palette.mode == .launcher ? settings.launcherHotkey.displayString : settings.clipboardHotkey.displayString)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -365,7 +359,8 @@ struct PaletteView: View {
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
-                .background(Color.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .foregroundStyle(.primary)
+                .background(keycapFill, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
             Text(label)
                 .foregroundStyle(.secondary)
         }
@@ -379,7 +374,6 @@ struct PaletteView: View {
         for (index, character) in source.enumerated() {
             var piece = AttributedString(String(character))
             if hits.contains(index) {
-                piece.foregroundColor = Color.accentColor
                 piece.font = .body.weight(.semibold)
             }
             result.append(piece)
@@ -405,6 +399,24 @@ struct PaletteView: View {
     private func safeIndex(_ count: Int) -> Int {
         guard count > 0 else { return 0 }
         return min(palette.selectedIndex, count - 1)
+    }
+
+    /// Graphite selection. The asset accent used to be yellow, and a 22% wash
+    /// of it was the peach bar in light mode and the muddy gold bar in dark mode.
+    private func rowFill(selected: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(selected ? selectionFill : Color.clear)
+    }
+
+    private var selectionFill: Color {
+        if colorScheme == .dark {
+            return Color.white.opacity(0.22)
+        }
+        return Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
+    }
+
+    private var keycapFill: Color {
+        Color.primary.opacity(colorScheme == .dark ? 0.18 : 0.10)
     }
 
     private func focusField() {
