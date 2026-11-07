@@ -6,7 +6,6 @@ enum DiskUsageFormat {
         let safe = Int64(max(0, count))
         if safe == 0 { return "0 KB" }
         let formatter = ByteCountFormatter()
-        formatter.locale = Locale(identifier: "zh-Hans-SG")
         formatter.countStyle = .binary
         formatter.allowedUnits = [.useBytes, .useKB, .useMB, .useGB, .useTB]
         formatter.includesActualByteCount = false

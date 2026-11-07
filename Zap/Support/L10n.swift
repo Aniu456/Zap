@@ -111,6 +111,7 @@ enum L10n {
     static let captureCaption = "截图"
     static let captureCopied = "已复制到剪贴板"
     static let captureTooLarge = "已复制。这张图超过 8 MB，没有写入历史"
+    static let captureRenderFailed = "标注渲染失败，请重试"
     static let captureFailed = "没有截到屏幕"
     static let captureSaved = "已保存"
     static let captureSaveFailed = "没有保存成功"

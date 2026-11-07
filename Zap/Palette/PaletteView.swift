@@ -8,6 +8,7 @@ struct PaletteView: View {
     @ObservedObject private var access = AccessibilityPermission.shared
     @ObservedObject private var settings = SettingsStore.shared
     @FocusState private var fieldFocused: Bool
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         VStack(spacing: 0) {
@@ -256,7 +257,7 @@ struct PaletteView: View {
 
     @ViewBuilder
     private func clipIcon(_ item: ClipboardItem) -> some View {
-        if item.kind == .image, let image = clipboard.image(for: item) {
+        if item.kind == .image, let image = clipboard.thumbnail(for: item, scale: displayScale) {
             Image(nsImage: image)
                 .resizable()
                 .interpolation(.high)

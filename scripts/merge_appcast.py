@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ITEM_RE = re.compile(r"<item\b.*?</item>", re.DOTALL)
@@ -37,10 +38,18 @@ def merge(new_xml: str, old_xml: str | None) -> str:
 
     seen = {version for item in new_items if (version := version_of(item))}
     kept: list[str] = []
-    if old_xml:
-        for item in items(old_xml):
+    if old_xml is not None:
+        root = ET.fromstring(old_xml)
+        if root.tag != "rss" or root.find("./channel/item") is None:
+            raise SystemExit("旧 appcast 不含有效的更新条目")
+        previous_items = items(old_xml)
+        if len(previous_items) != len(root.findall("./channel/item")):
+            raise SystemExit("旧 appcast 条目无法完整解析")
+        for item in previous_items:
             version = version_of(item)
-            if version is None or version in seen:
+            if version is None:
+                raise SystemExit("旧 appcast 条目缺少版本号")
+            if version in seen:
                 continue
             seen.add(version)
             kept.append(item)

@@ -271,6 +271,46 @@ final class ClipboardStoreBudgetTests: XCTestCase {
         XCTAssertGreaterThan(store.items.count, ClipboardPolicy.maxItems)
     }
 
+    @MainActor
+    func testLoadCleansOnlyOrphanedGeneratedImageFiles() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let kept = UUID().uuidString + ".png"
+        let orphan = UUID().uuidString + ".png"
+        let link = UUID().uuidString + ".png"
+        let folder = UUID().uuidString + ".png"
+        let images = directory.appendingPathComponent("images")
+        for name in [kept, orphan, "notes.png"] { try writeFile(named: name, in: directory) }
+        try FileManager.default.createDirectory(at: images.appendingPathComponent(folder), withIntermediateDirectories: false)
+        try FileManager.default.createSymbolicLink(at: images.appendingPathComponent(link), withDestinationURL: images.appendingPathComponent(kept))
+        let row = BudgetFixtures.item(hash: "kept", offset: 0, bytes: 2, kind: .image, filename: kept)
+        try writeHistory([row], to: directory, pretty: false)
+        ClipboardStore(testingDirectory: directory).load()
+        XCTAssertFalse(fileExists(orphan, in: directory))
+        for name in [kept, link, folder, "notes.png"] { XCTAssertTrue(fileExists(name, in: directory)) }
+    }
+
+    @MainActor
+    func testLoadPreservesImagesIfIndexIsCorrupt() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let name = UUID().uuidString + ".png"
+        try writeFile(named: name, in: directory)
+        try Data("broken".utf8).write(to: historyURL(directory))
+        ClipboardStore(testingDirectory: directory).load()
+        XCTAssertTrue(fileExists(name, in: directory))
+    }
+
+    @MainActor
+    func testCrashBeforeFirstIndexWrite() throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let name = UUID().uuidString + ".png"
+        try writeFile(named: name, in: directory)
+        ClipboardStore(testingDirectory: directory).load()
+        XCTAssertFalse(fileExists(name, in: directory))
+    }
+
     private func makeDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("zap-history-\(UUID().uuidString)", isDirectory: true)
