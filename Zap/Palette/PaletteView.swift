@@ -14,6 +14,9 @@ struct PaletteView: View {
             searchRow
             Divider().opacity(0.35)
             resultList
+            if let warning = clipboard.limitWarning, palette.mode == .clipboard {
+                pinnedLimitBanner(L10n.clipboardLimitWarning(warning))
+            }
             if palette.mode == .clipboard && !access.isTrusted {
                 permissionBanner
             }
@@ -198,6 +201,12 @@ struct PaletteView: View {
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Color.accentColor)
                     }
+                    if ClipboardPolicy.showsStoredSize(of: item) {
+                        Text(DiskUsageFormat.bytes(item.byteCount))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .layoutPriority(1)
+                    }
                     Text(RelativeTime.string(from: item.createdAt))
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -285,6 +294,20 @@ struct PaletteView: View {
         }
         .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func pinnedLimitBanner(_ message: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.primary)
+            Spacer(minLength: 8)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.12))
     }
 
     private var permissionBanner: some View {
