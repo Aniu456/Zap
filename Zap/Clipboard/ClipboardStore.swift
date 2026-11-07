@@ -123,10 +123,11 @@ final class ClipboardStore: ObservableObject {
         save()
     }
 
-    func delete(_ id: UUID) {
-        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
-        let removed = items.remove(at: index)
-        deleteFiles(for: [removed])
+    func delete(_ ids: Set<UUID>) {
+        let removed = items.filter { ids.contains($0.id) }
+        guard !removed.isEmpty else { return }
+        items.removeAll { ids.contains($0.id) }
+        deleteFiles(for: removed)
         save()
     }
 

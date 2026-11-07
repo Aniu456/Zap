@@ -36,6 +36,8 @@ enum L10n {
     static let close = "关闭"
     static let pin = "置顶"
     static let unpin = "取消置顶"
+    static let selectAll = "全选"
+    static func deleteSelection(_ count: Int) -> String { "删除所选（\(count)）" }
     static let deleteItem = "删除这条"
 
     static let accessibilityGranted = "辅助功能：已授权"
@@ -92,7 +94,6 @@ enum L10n {
     static let captureEditHint = "⌘Z 撤销   ⌘⇧Z 重做   ⌘S 保存   ↩ 复制   ⌘P 置顶   Esc 取消"
     static let captureCaption = "截图"
     static let captureCopied = "已复制到剪贴板"
-    static let capturePinned = "已置顶，并复制到剪贴板"
     static let captureTooLarge = "已复制。这张图超过 8 MB，没有写入历史"
     static let captureFailed = "没有截到屏幕"
     static let captureSaved = "已保存"

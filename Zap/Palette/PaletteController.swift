@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import Combine
 import SwiftUI
 
 enum PaletteMode: String, Equatable {
@@ -14,10 +15,13 @@ final class PaletteController: ObservableObject {
     @Published var mode: PaletteMode = .launcher
     @Published var query: String = "" {
         didSet {
-            guard query != oldValue, selectedIndex != 0 else { return }
+            guard query != oldValue else { return }
+            selectedClipIDs.removeAll()
             selectedIndex = 0
         }
     }
+    let scrollRequests = PassthroughSubject<Int, Never>()
+    @Published private(set) var selectedClipIDs: Set<UUID> = []
     @Published var selectedIndex = 0
     @Published private(set) var isPresented = false
     /// Bumps every time the palette opens so the search field is recreated empty.
@@ -38,6 +42,7 @@ final class PaletteController: ObservableObject {
     }
 
     func show(_ mode: PaletteMode) {
+        selectedClipIDs.removeAll()
         self.mode = mode
         // Do not keep the last search. The field editor can write it back, so the
         // text field is also recreated via fieldToken.
@@ -92,10 +97,13 @@ final class PaletteController: ObservableObject {
     func moveSelection(_ delta: Int) {
         let count = currentCount()
         guard count > 0 else { return }
+        selectedClipIDs.removeAll()
         selectedIndex = min(max(0, selectedIndex + delta), count - 1)
+        scrollRequests.send(selectedIndex)
     }
 
     func commitSelection() {
+        guard selectedClipIDs.isEmpty else { return }
         switch mode {
         case .launcher:
             let rows = AppIndex.shared.ranked(matching: query)
@@ -115,10 +123,26 @@ final class PaletteController: ObservableObject {
         }
     }
 
+    func clickClipboardRow(_ item: ClipboardItem, index: Int, modifiers: NSEvent.ModifierFlags) {
+        selectedIndex = index
+        if modifiers.contains(.shift) {
+            selectedClipIDs = Set(ClipboardStore.shared.ranked(matching: query).map(\.id))
+        } else if modifiers.contains(.command) {
+            if !selectedClipIDs.insert(item.id).inserted {
+                selectedClipIDs.remove(item.id)
+            }
+        } else {
+            selectedClipIDs.removeAll()
+            commitSelection()
+        }
+    }
+
     func deleteSelectedClipboardItem() {
         guard mode == .clipboard else { return }
         guard let item = selectedClipboardItem() else { return }
-        ClipboardStore.shared.delete(item.id)
+        ClipboardStore.shared.delete(selectedClipIDs.isEmpty ? [item.id] : selectedClipIDs)
+        selectedClipIDs.removeAll()
+        selectedIndex = min(selectedIndex, max(0, currentCount() - 1))
     }
 
     func togglePinSelected() {
@@ -166,6 +190,12 @@ final class PaletteController: ObservableObject {
         case .clipboard:
             return ClipboardStore.shared.ranked(matching: query).count
         }
+    }
+
+    /// Prepare the first layout while the menu bar app is idle, without ordering the panel on screen.
+    func prepareForFirstOpen() {
+        guard panel == nil else { return }
+        ensurePanel().contentView?.layoutSubtreeIfNeeded()
     }
 
     private func ensurePanel() -> PalettePanel {

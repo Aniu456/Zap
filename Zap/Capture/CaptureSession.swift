@@ -4,18 +4,12 @@ import UniformTypeIdentifiers
 
 /// Main-thread capture UI. Callers are already on the main actor.
 final class CaptureSession: NSObject, NSTextFieldDelegate {
-    struct Outcome {
-        enum Kind {
-            case copied
-            case pinned
-        }
-
-        var kind: Kind
-        var png: Data
-        var image: NSImage
-        var screenFrame: NSRect
+    enum Outcome {
+        case copied(Data)
+        case pinned(NSImage, NSRect)
     }
 
+    let loupe = PixelLoupe()
     private let shots: [ScreenGrabber.Shot]
     private let onFinish: (Outcome?) -> Void
     private var windows: [CGDirectDisplayID: CaptureWindow] = [:]
@@ -204,8 +198,18 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
         }
     }
 
+    func updateLoupe(in view: CaptureOverlayView, point: CGPoint) {
+        guard !finished, textField == nil, view.hitTest(point) === view,
+              let shot = shots.first(where: { $0.displayID == view.displayID }) else {
+            loupe.hide()
+            return
+        }
+        loupe.update(image: shot.image, in: view, point: point)
+    }
+
     func keyDown(_ event: NSEvent) {
         if textField != nil { return }
+        if loupe.copyColor(event) { return }
         let modifiers = event.modifierFlags.intersection([.command, .option, .shift, .control])
         if event.keyCode == UInt16(kVK_Escape) {
             cancel()
@@ -409,12 +413,11 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
 
     private func commit(pin: Bool) {
         guard let rendered = exportRender() else { return }
-        finish(Outcome(
-            kind: pin ? .pinned : .copied,
-            png: rendered.png,
-            image: rendered.image,
-            screenFrame: rendered.screenFrame
-        ))
+        if pin {
+            finish(.pinned(NSImage(cgImage: rendered.image, size: rendered.screenFrame.size), rendered.screenFrame))
+        } else if let data = pngData(rendered.image) {
+            finish(.copied(data))
+        }
     }
 
     private func saveToFile() {
@@ -433,30 +436,32 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
         }
         guard response == .OK, let url = panel.url else { return }
         do {
-            try rendered.png.write(to: url)
+            guard let data = pngData(rendered.image) else { return }
+            try data.write(to: url)
             showToast(L10n.captureSaved)
         } catch {
             showToast(L10n.captureSaveFailed)
         }
     }
 
-    private func exportRender() -> (png: Data, image: NSImage, screenFrame: NSRect)? {
+    private func exportRender() -> (image: CGImage, screenFrame: NSRect)? {
         guard let crop, let selection, let displayID = activeDisplay,
               let shot = shots.first(where: { $0.displayID == displayID }) else { return nil }
         let rendered = CaptureRenderer.render(base: crop, marks: marks) ?? crop
-        guard let png = CaptureRenderer.pngData(from: rendered) else {
-            showToast(L10n.captureFailed)
-            return nil
-        }
         let pointSize = NSSize(width: max(selection.width, 1), height: max(selection.height, 1))
-        let image = NSImage(cgImage: rendered, size: pointSize)
         let screenFrame = NSRect(
             x: shot.frame.minX + selection.minX,
             y: shot.frame.minY + selection.minY,
             width: pointSize.width,
             height: pointSize.height
         )
-        return (png, image, screenFrame)
+        return (rendered, screenFrame)
+    }
+
+    private func pngData(_ image: CGImage) -> Data? {
+        let data = CaptureRenderer.pngData(from: image)
+        if data == nil { showToast(L10n.captureFailed) }
+        return data
     }
 
     private func showToast(_ message: String) {
@@ -645,7 +650,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
         let origin = CaptureGeometry.clampedToolbarOrigin(
             toolbar.frame.origin,
             toolbarSize: toolbar.frame.size,
-            bounds: superview.bounds
+            bounds: superview.bounds, gap: 0
         )
         if origin != toolbar.frame.origin {
             toolbar.frame.origin = origin
@@ -660,6 +665,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
     private func finish(_ outcome: Outcome?) {
         guard !finished else { return }
         finished = true
+        loupe.hide()
         if let globalMouseMonitor {
             NSEvent.removeMonitor(globalMouseMonitor)
             self.globalMouseMonitor = nil

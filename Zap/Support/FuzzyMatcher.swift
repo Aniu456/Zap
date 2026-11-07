@@ -91,24 +91,39 @@ enum FuzzyMatcher {
     }
 
     private static func bestDistance(query: [Character], candidate: [Character], limit: Int) -> Int {
-        let direct = editDistance(query, candidate)
-        if direct <= limit || candidate.count <= query.count {
-            return direct
+        // Preserve whole-name scoring when its distance is already acceptable.
+        if candidate.count <= query.count + limit {
+            let direct = editDistance(query, candidate)
+            if direct <= limit || candidate.count <= query.count { return direct }
         }
-        var best = direct
-        let minWidth = max(1, query.count - limit)
-        let maxWidth = min(candidate.count, query.count + limit)
-        guard minWidth <= maxWidth else { return best }
-        for width in minWidth...maxWidth {
-            var start = 0
-            while start + width <= candidate.count {
-                let distance = editDistance(query, Array(candidate[start..<(start + width)]))
-                if distance < best {
-                    best = distance
-                    if best == 0 { return 0 }
+
+        // A zero-cost candidate prefix lets each column start a new substring.
+        // Distances within the limit imply the same window lengths as the old
+        // sliding-window search. Keep three columns for adjacent transpositions.
+        var previous = Array(0...query.count)
+        var current = previous
+        var beforePrevious = previous
+        var best = limit + 1
+        for column in candidate.indices {
+            current[0] = 0
+            for row in 1...query.count {
+                let cost = candidate[column] == query[row - 1] ? 0 : 1
+                var distance = min(
+                    previous[row] + 1,
+                    current[row - 1] + 1,
+                    previous[row - 1] + cost
+                )
+                if column > 0, row > 1,
+                   candidate[column] == query[row - 2],
+                   candidate[column - 1] == query[row - 1] {
+                    distance = min(distance, beforePrevious[row - 2] + 1)
                 }
-                start += 1
+                current[row] = distance
             }
+            best = min(best, current[query.count])
+            if best == 0 { return 0 }
+            swap(&beforePrevious, &previous)
+            swap(&current, &previous)
         }
         return best
     }

@@ -20,6 +20,24 @@ final class CaptureOverlayView: NSView {
     let displayID: CGDirectDisplayID
     weak var session: CaptureSession?
 
+    private var pointerTracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let pointerTracking { removeTrackingArea(pointerTracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.activeAlways, .inVisibleRect, .mouseMoved, .mouseEnteredAndExited], owner: self, userInfo: nil)
+        addTrackingArea(area)
+        pointerTracking = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        session?.updateLoupe(in: self, point: convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseEntered(with event: NSEvent) { mouseMoved(with: event) }
+    override func mouseExited(with event: NSEvent) { session?.loupe.hide() }
+    override func flagsChanged(with event: NSEvent) { session?.loupe.flagsChanged(event.modifierFlags) }
+
     init(displayID: CGDirectDisplayID) {
         self.displayID = displayID
         super.init(frame: .zero)
@@ -91,6 +109,7 @@ final class CaptureOverlayView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        session?.loupe.hide()
         session?.mouseDown(displayID: displayID, point: convert(event.locationInWindow, from: nil))
     }
 

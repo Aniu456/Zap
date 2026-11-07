@@ -13,6 +13,8 @@ final class SettingsWindowController {
         let window = ensureWindow()
         window.center()
         window.makeKeyAndOrderFront(nil)
+        AccessibilityPermission.shared.refresh()
+        ScreenRecordingPermission.shared.refresh()
     }
 
     private func ensureWindow() -> NSWindow {

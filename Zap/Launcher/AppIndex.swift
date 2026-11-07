@@ -27,17 +27,20 @@ final class AppIndex: ObservableObject {
     @Published private(set) var apps: [LaunchableApp] = []
     @Published private(set) var isScanning = false
 
+    private let icons = NSCache<NSString, NSImage>()
+    private var cachedRanking: (query: String, rows: [RankedApp])?
     private var lastScan = Date.distantPast
     private let recentKey = "zap.recentApps"
     private var watchers: [DispatchSourceFileSystemObject] = []
     private var rescanWork: DispatchWorkItem?
     private var scanInFlight = false
 
-    private init() {}
+    private init() { icons.countLimit = 128 }
 
     func start() {
         if let directory = AppIndexStore.supportDirectory(),
            let cached = AppIndexStore.load(from: directory), !cached.isEmpty {
+            cachedRanking = nil
             apps = cached
         }
         watchInstallLocations()
@@ -55,6 +58,21 @@ final class AppIndex: ObservableObject {
 
     func ranked(matching query: String) -> [RankedApp] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let cachedRanking, cachedRanking.query == trimmed { return cachedRanking.rows }
+        let rows = rank(trimmed)
+        cachedRanking = (trimmed, rows)
+        return rows
+    }
+
+    func icon(for app: LaunchableApp) -> NSImage {
+        let key = app.path as NSString
+        if let cached = icons.object(forKey: key) { return cached }
+        let image = NSWorkspace.shared.icon(forFile: app.path)
+        icons.setObject(image, forKey: key)
+        return image
+    }
+
+    private func rank(_ trimmed: String) -> [RankedApp] {
         if trimmed.isEmpty {
             return orderedForEmptyQuery().map { RankedApp(app: $0, match: FuzzyMatch(score: 0, indices: [])) }
         }
@@ -107,11 +125,9 @@ final class AppIndex: ObservableObject {
         if apps.isEmpty {
             isScanning = true
         }
-        DispatchQueue.global(qos: .userInitiated).async {
-            let found = AppScanner.scan()
-            Task { @MainActor in
-                AppIndex.shared.apply(found)
-            }
+        Task {
+            let found = await AppScanner.scan()
+            apply(found)
         }
     }
 
@@ -124,6 +140,8 @@ final class AppIndex: ObservableObject {
         // A failed or empty walk must not replace a list the window is already showing.
         if found.isEmpty && !apps.isEmpty { return }
         guard !sameCatalog(found, apps) else { return }
+        cachedRanking = nil
+        icons.removeAllObjects()
         apps = found
         if let directory = AppIndexStore.supportDirectory() {
             AppIndexStore.save(found, to: directory)
@@ -188,6 +206,7 @@ final class AppIndex: ObservableObject {
         if recent.count > 12 {
             recent = Array(recent.prefix(12))
         }
+        cachedRanking = nil
         UserDefaults.standard.set(recent, forKey: recentKey)
     }
 }
@@ -209,49 +228,86 @@ enum AppScanner {
         return roots.filter { seen.insert($0.resolvingSymlinksInPath().path).inserted }
     }
 
-    static func scan() -> [LaunchableApp] {
+    static func scan() async -> [LaunchableApp] {
+        // Read independent bundle metadata in a bounded number of background tasks.
+        let urls = applicationCandidates()
+        let chunkSize = max(1, (urls.count + 3) / 4)
+        var apps = await withTaskGroup(of: [LaunchableApp].self) { group in
+            for start in stride(from: 0, to: urls.count, by: chunkSize) {
+                let chunk = urls[start..<min(start + chunkSize, urls.count)]
+                group.addTask { chunk.compactMap { makeApp(url: $0) } }
+            }
+            var results: [LaunchableApp] = []
+            for await batch in group { results.append(contentsOf: batch) }
+            return results
+        }
+        apps.sort {
+            let comparison = $0.name.localizedStandardCompare($1.name)
+            return comparison == .orderedSame ? $0.path < $1.path : comparison == .orderedAscending
+        }
+        return apps
+    }
+
+    private static func applicationCandidates() -> [URL] {
         let fileManager = FileManager.default
         var roots = rootURLs()
         roots.append(URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app"))
 
         var seen = Set<String>()
-        var apps: [LaunchableApp] = []
+        let rootPaths = Set(roots.map(\.path))
+        var candidates: [URL] = []
         for root in roots {
             var isDirectory: ObjCBool = false
             guard fileManager.fileExists(atPath: root.path, isDirectory: &isDirectory) else { continue }
             if root.pathExtension.lowercased() == "app" {
-                if let app = makeApp(url: root, seen: &seen) {
-                    apps.append(app)
+                if let url = applicationURL(root, seen: &seen) {
+                    candidates.append(url)
                 }
                 continue
             }
-            guard isDirectory.boolValue,
-                  let enumerator = fileManager.enumerator(
-                    at: root,
-                    includingPropertiesForKeys: [.isDirectoryKey],
-                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
-                  ) else { continue }
-            let rootDepth = root.resolvingSymlinksInPath().pathComponents.count
-            for case let url as URL in enumerator {
-                if url.pathComponents.count - rootDepth > 5 {
-                    enumerator.skipDescendants()
+            guard isDirectory.boolValue else { continue }
+            let keys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey]
+            var pending = [(root, 1)]
+            while let (directory, depth) = pending.popLast() {
+                guard let entries = try? fileManager.contentsOfDirectory(
+                    at: directory, includingPropertiesForKeys: [], options: .skipsHiddenFiles
+                ) else { continue }
+                // Package classification may initialize Launch Services. Only ask for
+                // folders with a candidate app or another directory worth visiting.
+                let children = entries.filter { url in
+                    if url.pathExtension.lowercased() == "app" { return true }
+                    guard depth < 5, !rootPaths.contains(url.path),
+                          let values = try? url.resourceValues(forKeys: keys) else { return false }
+                    return values.isDirectory == true && values.isSymbolicLink != true
+                }
+                guard !children.isEmpty else { continue }
+                if depth > 1,
+                   (try? directory.resourceValues(forKeys: [.isPackageKey]))?.isPackage != false {
                     continue
                 }
-                guard url.pathExtension.lowercased() == "app" else { continue }
-                if let app = makeApp(url: url, seen: &seen) {
-                    apps.append(app)
+                for url in children {
+                    if url.pathExtension.lowercased() == "app" {
+                        if let candidate = applicationURL(url, seen: &seen) {
+                            candidates.append(candidate)
+                        }
+                    } else {
+                        pending.append((url, depth + 1))
+                    }
                 }
             }
         }
-        apps.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        return apps
+        return candidates
     }
 
-    private static func makeApp(url: URL, seen: inout Set<String>) -> LaunchableApp? {
+    private static func applicationURL(_ url: URL, seen: inout Set<String>) -> URL? {
         let resolved = url.resolvingSymlinksInPath().standardizedFileURL
         let path = resolved.path
         if path.range(of: ".app/", options: .caseInsensitive) != nil { return nil }
         guard seen.insert(path).inserted else { return nil }
+        return resolved
+    }
+
+    private static func makeApp(url resolved: URL) -> LaunchableApp? {
         let fallback = resolved.deletingPathExtension().lastPathComponent
         let bundle = Bundle(url: resolved)
         let localized = bundle?.localizedInfoDictionary
@@ -265,7 +321,7 @@ enum AppScanner {
         return LaunchableApp(
             name: name,
             bundleName: string(info?["CFBundleName"]),
-            path: path,
+            path: resolved.path,
             bundleIdentifier: bundle?.bundleIdentifier
         )
     }

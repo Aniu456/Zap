@@ -90,9 +90,9 @@ final class CaptureGeometryTests: XCTestCase {
             toolbarSize: CGSize(width: 120, height: 44),
             bounds: CGRect(x: 0, y: 0, width: 400, height: 300)
         )
-        XCTAssertEqual(origin, CGPoint(x: 120, y: 78))
+        XCTAssertEqual(origin, CGPoint(x: 120, y: 49))
         XCTAssertEqual(origin.x + 120, 240, accuracy: 0.001)
-        XCTAssertEqual(origin.y + 22, 100, accuracy: 0.001)
+        XCTAssertEqual(origin.y + 44 + 7, 100, accuracy: 0.001)
     }
 
     func testToolbarWiderThanTheSelectionStaysRightAligned() {
@@ -102,7 +102,7 @@ final class CaptureGeometryTests: XCTestCase {
             bounds: CGRect(x: 0, y: 0, width: 400, height: 300)
         )
         XCTAssertEqual(origin.x + 120, 150, accuracy: 0.001)
-        XCTAssertEqual(origin.y + 22, 100, accuracy: 0.001)
+        XCTAssertEqual(origin.y + 44 + 7, 100, accuracy: 0.001)
     }
 
     func testBottomRightToolbarIsPulledBackOntoTheScreen() {
@@ -111,7 +111,14 @@ final class CaptureGeometryTests: XCTestCase {
             toolbarSize: CGSize(width: 120, height: 44),
             bounds: CGRect(x: 0, y: 0, width: 400, height: 300)
         )
-        XCTAssertEqual(origin, CGPoint(x: 120, y: 8))
+        XCTAssertEqual(origin, CGPoint(x: 120, y: 97))
+    }
+
+    func testFullScreenSelectionKeepsToolbarInsideAndFlushRight() {
+        let bounds = CGRect(x: 0, y: 0, width: 500, height: 300)
+        let size = CGSize(width: 410, height: 32)
+        let origin = CaptureGeometry.toolbarOrigin(selection: bounds, toolbarSize: size, bounds: bounds)
+        XCTAssertEqual(origin, CGPoint(x: 90, y: 7))
     }
 
     func testDraggedToolbarStaysPutUntilItWouldLeaveTheScreen() {
@@ -154,6 +161,27 @@ final class ArrowGeometryTests: XCTestCase {
 }
 
 final class MosaicBufferTests: XCTestCase {
+    func testDirectBufferPreservesRowPadding() {
+        var pixels: [UInt8] = [
+            10, 20, 30, 255, 30, 40, 50, 255, 99, 98, 97, 96,
+            50, 60, 70, 255, 70, 80, 90, 255, 95, 94, 93, 92
+        ]
+        pixels.withUnsafeMutableBufferPointer { buffer in
+            MosaicBuffer.pixelate(
+                pixels: buffer,
+                width: 2,
+                height: 2,
+                bytesPerRow: 12,
+                rect: CaptureGeometry.PixelRect(x: 0, y: 0, width: 2, height: 2),
+                block: 2
+            )
+        }
+        XCTAssertEqual(pixels, [
+            40, 50, 60, 255, 40, 50, 60, 255, 99, 98, 97, 96,
+            40, 50, 60, 255, 40, 50, 60, 255, 95, 94, 93, 92
+        ])
+    }
+
     func testBlockAverageFillsTheRect() {
         var pixels: [UInt8] = [
             255, 0, 0, 255, 0, 0, 255, 255,
@@ -283,5 +311,25 @@ final class CaptureRendererOrientationTests: XCTestCase {
         let offset = yFromTop * image.bytesPerRow + x * 4
         guard offset >= 0, offset + 3 < length else { return nil }
         return (pointer[offset], pointer[offset + 1], pointer[offset + 2], pointer[offset + 3])
+    }
+}
+
+final class PixelSampleTests: XCTestCase {
+    func testSamplingScaledImageAndFormattingFlutterAlpha() throws {
+        // Top-left pixel is half-transparent red. Bottom-left is opaque green.
+        let bytes: [UInt8] = [128, 0, 0, 128, 0, 0, 0, 255, 0, 255, 0, 255, 0, 0, 0, 255]
+        let provider = try XCTUnwrap(CGDataProvider(data: Data(bytes) as CFData))
+        let image = try XCTUnwrap(CGImage(width: 2, height: 2, bitsPerComponent: 8, bitsPerPixel: 32,
+            bytesPerRow: 8, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent))
+        let bounds = CGRect(x: 0, y: 0, width: 6, height: 6)
+        let red = try XCTUnwrap(PixelSample(image: image, point: CGPoint(x: 1, y: 5), bounds: bounds))
+        XCTAssertEqual(red.value(.hex), "#FF0000")
+        XCTAssertEqual(red.value(.rgba), "RGBA(255, 0, 0, 128)")
+        XCTAssertEqual(red.value(.flutterHex), "Color(0x80FF0000)")
+        XCTAssertEqual(red.value(.flutterDecimal), "Color.fromARGB(128, 255, 0, 0)")
+        let green = try XCTUnwrap(PixelSample(image: image, point: CGPoint(x: 1, y: 1), bounds: bounds))
+        XCTAssertEqual(green.value(.rgb), "rgb(0, 255, 0)")
     }
 }

@@ -93,19 +93,18 @@ final class CaptureController {
         isActive = false
         isStarting = false
         guard let outcome else { return }
-        let stored = ClipboardStore.shared.publishCapturedPNG(outcome.png, caption: L10n.captureCaption)
-        switch outcome.kind {
-        case .copied:
+        switch outcome {
+        case .copied(let data):
+            let stored = ClipboardStore.shared.publishCapturedPNG(data, caption: L10n.captureCaption)
             ToastCenter.shared.show(stored ? L10n.captureCopied : L10n.captureTooLarge)
             restorePreviousApp()
-        case .pinned:
-            let pin = PinWindowController(image: outcome.image, screenFrame: outcome.screenFrame)
+        case .pinned(let image, let screenFrame):
+            let pin = PinWindowController(image: image, screenFrame: screenFrame)
             pin.onClose = { [weak self, weak pin] in
                 guard let self, let pin else { return }
                 self.pins.removeAll { $0 === pin }
             }
             pins.append(pin)
-            ToastCenter.shared.show(stored ? L10n.capturePinned : L10n.captureTooLarge)
         }
     }
 

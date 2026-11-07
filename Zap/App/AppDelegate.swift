@@ -51,6 +51,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ClipboardStore.shared.load()
         ClipboardMonitor.shared.start()
         statusItem = StatusItemController(updater: updaterController)
+        DispatchQueue.main.async {
+            PaletteController.shared.prepareForFirstOpen()
+        }
     }
 
     func checkForUpdates(_ sender: Any?) {
