@@ -346,7 +346,7 @@ final class PaletteChrome: NSVisualEffectView {
 final class ClearHostingView<Content: View>: NSHostingView<Content> {
     override var isOpaque: Bool { false }
 
-    override init(rootView: Content) {
+    required init(rootView: Content) {
         super.init(rootView: rootView)
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
