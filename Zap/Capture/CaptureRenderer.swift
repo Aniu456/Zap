@@ -90,23 +90,20 @@ enum CaptureRenderer {
         let bytesPerRow = context.bytesPerRow
         let count = bytesPerRow * imageHeight
         guard count > 0 else { return }
-        var pixels = [UInt8](repeating: 0, count: count)
-        pixels.withUnsafeMutableBytes { raw in
-            raw.copyMemory(from: UnsafeRawBufferPointer(start: data, count: count))
-        }
+        let pixels = UnsafeMutableBufferPointer(
+            start: data.assumingMemoryBound(to: UInt8.self),
+            count: count
+        )
         // The base image was drawn upright, so row 0 is the top. Mosaic rects use that origin.
         let block = max(8, min(imageWidth, imageHeight) / 80)
         MosaicBuffer.pixelate(
-            pixels: &pixels,
+            pixels: pixels,
             width: imageWidth,
             height: imageHeight,
             bytesPerRow: bytesPerRow,
             rect: area,
             block: block
         )
-        pixels.withUnsafeBytes { raw in
-            UnsafeMutableRawBufferPointer(start: data, count: count).copyMemory(from: raw)
-        }
     }
 
     private static let markColor = CGColor(red: 0.90, green: 0.15, blue: 0.18, alpha: 1)

@@ -28,7 +28,7 @@ final class PinWindowController: NSObject {
         window.isReleasedWhenClosed = false
         let view = PinContentView(image: image)
         view.onClose = { [weak self] in self?.close() }
-        view.onResetScale = { [weak self] in self?.resetScale() }
+        window.acceptsMouseMovedEvents = true
         view.onScale = { [weak self] factor in self?.scale(by: factor) }
         window.contentView = view
         window.setFrame(screenFrame, display: true)
@@ -36,13 +36,10 @@ final class PinWindowController: NSObject {
     }
 
     func close() {
+        (window.contentView as? PinContentView)?.loupe.hide()
         window.orderOut(nil)
         window.contentView = nil
         onClose?()
-    }
-
-    private func resetScale() {
-        scale(to: 1)
     }
 
     private func scale(by factor: CGFloat) {
@@ -67,7 +64,9 @@ final class PinWindow: NSPanel {
 
 final class PinContentView: NSView {
     var onClose: (() -> Void)?
-    var onResetScale: (() -> Void)?
+    let loupe = PixelLoupe()
+    private var picking = false
+    private lazy var bitmap = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
     var onScale: ((CGFloat) -> Void)?
 
     private let image: NSImage
@@ -90,6 +89,9 @@ final class PinContentView: NSView {
         closeButton.frame = NSRect(x: 0, y: 0, width: 22, height: 22)
         addSubview(closeButton)
         menu = NSMenu()
+        let picker = NSMenuItem(title: "取色器", action: #selector(togglePicker(_:)), keyEquivalent: "")
+        picker.target = self
+        menu?.addItem(picker)
         let item = NSMenuItem(title: L10n.closePin, action: #selector(close), keyEquivalent: "")
         item.target = self
         menu?.addItem(item)
@@ -114,7 +116,7 @@ final class PinContentView: NSView {
         }
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
             owner: self,
             userInfo: nil
         )
@@ -128,19 +130,21 @@ final class PinContentView: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         closeButton.alphaValue = 1
+        mouseMoved(with: event)
     }
 
     override func mouseExited(with event: NSEvent) {
         closeButton.alphaValue = 0
+        loupe.hide()
     }
 
     override func mouseDown(with event: NSEvent) {
         window?.makeKey()
         if event.clickCount == 2 {
-            onResetScale?()
+            close()
             return
         }
-        window?.performDrag(with: event)
+        if !picking { window?.performDrag(with: event) }
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -155,7 +159,31 @@ final class PinContentView: NSView {
             close()
             return
         }
+        if picking && loupe.copyColor(event) { return }
         super.keyDown(with: event)
+    }
+
+    @objc private func togglePicker(_ item: NSMenuItem) {
+        picking.toggle()
+        item.state = picking ? .on : .off
+        if picking {
+            window?.makeKey()
+            window?.makeFirstResponder(self)
+            if let window { updateSample(window.mouseLocationOutsideOfEventStream) }
+        } else {
+            loupe.hide()
+        }
+    }
+
+    override func mouseMoved(with event: NSEvent) { updateSample(event.locationInWindow) }
+
+    private func updateSample(_ windowPoint: CGPoint) {
+        guard picking, let bitmap else { return }
+        loupe.update(image: bitmap, in: self, point: convert(windowPoint, from: nil))
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        if picking { loupe.flagsChanged(event.modifierFlags) }
     }
 
     @objc private func close() {

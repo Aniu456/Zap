@@ -120,7 +120,9 @@ struct PaletteView: View {
                         index: index,
                         item: row.item,
                         indices: row.match.indices,
-                        selected: safeIndex(rows.count) == index
+                        selected: palette.selectedClipIDs.isEmpty
+                            ? safeIndex(rows.count) == index
+                            : palette.selectedClipIDs.contains(row.id)
                     )
                 }
             }
@@ -138,10 +140,17 @@ struct PaletteView: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
+                .background {
+                    if palette.mode == .clipboard {
+                        CompactScrollbar()
+                    }
+                }
             }
-            .onChange(of: palette.selectedIndex) { _, index in
+            .onChange(of: palette.query) { _, _ in proxy.scrollTo(0, anchor: .top) }
+            .onChange(of: palette.fieldToken) { _, _ in proxy.scrollTo(0, anchor: .top) }
+            .onReceive(palette.scrollRequests) { index in
                 guard count > 0 else { return }
-                proxy.scrollTo(min(index, count - 1), anchor: .center)
+                proxy.scrollTo(min(index, count - 1), anchor: nil)
             }
         }
     }
@@ -163,6 +172,7 @@ struct PaletteView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .focusable(false)
         .onHover { inside in
             if inside { palette.selectedIndex = index }
         }
@@ -171,10 +181,14 @@ struct PaletteView: View {
     private func clipboardRow(index: Int, item: ClipboardItem, indices: [Int], selected: Bool) -> some View {
         HStack(spacing: 8) {
             Button {
-                palette.selectedIndex = index
-                palette.commitSelection()
+                palette.clickClipboardRow(item, index: index, modifiers: NSEvent.modifierFlags)
             } label: {
                 HStack(spacing: 10) {
+                    if selected && !palette.selectedClipIDs.isEmpty {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(Color.accentColor)
+                            .accessibilityHidden(true)
+                    }
                     clipIcon(item)
                     highlighted(item.displayText, indices: indices.filter { $0 < item.displayText.count })
                         .lineLimit(1)
@@ -189,9 +203,11 @@ struct PaletteView: View {
                         .foregroundStyle(.secondary)
                         .layoutPriority(1)
                 }
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            if selected {
+            if selected && palette.selectedClipIDs.isEmpty {
                 Button {
                     palette.selectedIndex = index
                     palette.togglePinSelected()
@@ -224,7 +240,7 @@ struct PaletteView: View {
     }
 
     private func appIcon(_ app: LaunchableApp) -> some View {
-        Image(nsImage: NSWorkspace.shared.icon(forFile: app.path))
+        Image(nsImage: apps.icon(for: app))
             .resizable()
             .frame(width: 28, height: 28)
     }
@@ -295,7 +311,20 @@ struct PaletteView: View {
             keyHint("↩", palette.mode == .launcher ? L10n.open : L10n.paste)
             keyHint("esc", L10n.close)
             if palette.mode == .clipboard {
-                keyHint("⌘⌫", L10n.deleteItem)
+                if palette.selectedClipIDs.isEmpty {
+                    keyHint("⇧点击", L10n.selectAll)
+                    keyHint("⌘⌫", L10n.deleteItem)
+                } else {
+                    Button(role: .destructive) {
+                        palette.deleteSelectedClipboardItem()
+                    } label: {
+                        Label(L10n.deleteSelection(palette.selectedClipIDs.count), systemImage: "trash.fill")
+                            .fontWeight(.semibold)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .controlSize(.regular)
+                }
             }
             Spacer()
             Text(palette.mode == .launcher ? settings.launcherHotkey.displayString : settings.clipboardHotkey.displayString)
@@ -358,5 +387,20 @@ struct PaletteView: View {
         DispatchQueue.main.async {
             fieldFocused = true
         }
+    }
+}
+
+private struct CompactScrollbar: NSViewRepresentable {
+    final class Probe: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            enclosingScrollView?.verticalScroller?.controlSize = .mini
+        }
+    }
+
+    func makeNSView(context: Context) -> Probe { Probe() }
+
+    func updateNSView(_ view: Probe, context: Context) {
+        view.enclosingScrollView?.verticalScroller?.controlSize = .mini
     }
 }

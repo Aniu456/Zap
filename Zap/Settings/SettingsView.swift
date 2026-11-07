@@ -149,6 +149,14 @@ struct SettingsView: View {
         } message: {
             Text(L10n.clearMessage)
         }
+        .onAppear {
+            access.refresh()
+            screenRecording.refresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            access.refresh()
+            screenRecording.refresh()
+        }
     }
 
     private var versionText: String {

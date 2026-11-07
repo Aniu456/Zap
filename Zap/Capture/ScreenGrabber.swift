@@ -34,9 +34,36 @@ enum ScreenGrabber {
                 heightPx: max(1, Int((screen.frame.height * scale).rounded()))
             )
         }
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         var shots: [Shot] = []
-        for screen in screens {
+        if #available(macOS 15.2, *) {
+            // A display-space capture avoids enumerating every shareable window.
+            shots = await withTaskGroup(of: Shot?.self) { group in
+                for screen in screens {
+                    let rect = CGDisplayBounds(screen.displayID)
+                    group.addTask {
+                        guard let image = try? await SCScreenshotManager.captureImage(in: rect),
+                              image.width == screen.widthPx, image.height == screen.heightPx else { return nil }
+                        return Shot(displayID: screen.displayID, frame: screen.frame, image: image)
+                    }
+                }
+                var result: [Shot] = []
+                for await shot in group {
+                    if let shot { result.append(shot) }
+                }
+                return result
+            }
+        }
+        let captured = Set(shots.map(\.displayID))
+        let remaining = screens.filter { !captured.contains($0.displayID) }
+        guard !remaining.isEmpty else { return shots.sortedByDisplayOrder(screens.map(\.displayID)) }
+        let content: SCShareableContent
+        do {
+            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        } catch {
+            if shots.isEmpty { throw error }
+            return shots.sortedByDisplayOrder(screens.map(\.displayID))
+        }
+        for screen in remaining {
             guard let display = content.displays.first(where: { $0.displayID == screen.displayID }) else { continue }
             let filter = SCContentFilter(display: display, excludingWindows: [])
             let config = SCStreamConfiguration()
@@ -50,6 +77,12 @@ enum ScreenGrabber {
                 continue
             }
         }
-        return shots
+        return shots.sortedByDisplayOrder(screens.map(\.displayID))
+    }
+}
+
+private extension Array where Element == ScreenGrabber.Shot {
+    func sortedByDisplayOrder(_ ids: [CGDirectDisplayID]) -> Self {
+        ids.compactMap { id in first { $0.displayID == id } }
     }
 }

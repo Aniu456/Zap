@@ -2,6 +2,24 @@ import XCTest
 @testable import Zap
 
 final class FuzzyMatcherTests: XCTestCase {
+    func testWholeNameDistanceTakesPriorityOverCloserSubstring() {
+        XCTAssertEqual(
+            FuzzyMatcher.match(query: "abcdefgh", candidate: "xbcdefghz"),
+            FuzzyMatch(score: 61, indices: [])
+        )
+    }
+
+    func testTypoInsideLongTextAndAtItsEdges() {
+        let padding = String(repeating: "z", count: 4_000)
+        for candidate in ["abcdfegh" + padding, padding + "abcdfegh", padding + "abcdfegh" + padding] {
+            XCTAssertEqual(
+                FuzzyMatcher.match(query: "abcdefgh", candidate: candidate),
+                FuzzyMatch(score: 48, indices: [])
+            )
+        }
+        XCTAssertNil(FuzzyMatcher.match(query: "abcdefgh", candidate: padding))
+    }
+
     func testEmptyQueryMatchesEverything() {
         let match = FuzzyMatcher.match(query: "   ", candidate: "Safari")
         XCTAssertEqual(match, FuzzyMatch(score: 0, indices: []))

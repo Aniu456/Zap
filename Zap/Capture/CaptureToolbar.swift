@@ -23,7 +23,7 @@ final class CaptureToolbar: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = 9
+        layer?.cornerRadius = 6
         layer?.backgroundColor = NSColor(srgbRed: 0.965, green: 0.965, blue: 0.965, alpha: 0.97).cgColor
         layer?.borderWidth = 1
         layer?.borderColor = NSColor.black.withAlphaComponent(0.08).cgColor
@@ -109,7 +109,8 @@ final class CaptureToolbar: NSView {
         button?.highlight(false)
         if dragMoved {
             NSCursor.closedHand.pop()
-        } else if let button, button.isEnabled {
+        } else if let button, button.isEnabled,
+                  button.frame.contains(convert(event.locationInWindow, from: nil)) {
             button.performClick(nil)
         }
         dragGrab = nil
@@ -124,6 +125,9 @@ final class CaptureToolbar: NSView {
     }
 
     func setTool(_ tool: CaptureTool) {
+        if let selected = toolButtons[tool] {
+            colorDot.frame.origin.x = selected.frame.maxX - colorDot.frame.width
+        }
         for (candidate, button) in toolButtons {
             style(button, selected: candidate == tool)
         }
@@ -144,8 +148,8 @@ final class CaptureToolbar: NSView {
     }
 
     private func build() {
-        let height: CGFloat = 36
-        let buttonSide: CGFloat = 26
+        let height: CGFloat = 32
+        let buttonSide: CGFloat = 29
         var x = gripWidth
         let y = (height - buttonSide) / 2
 
@@ -162,7 +166,6 @@ final class CaptureToolbar: NSView {
         colorDot.layer?.cornerRadius = 3
         let dotX = box.frame.midX + 6
         colorDot.frame = NSRect(x: dotX, y: height - 8, width: 6, height: 6)
-        addSubview(colorDot)
 
         place(toolButton(.arrow, symbol: "arrow.up.right", tip: L10n.toolArrow))
         place(toolButton(.pencil, symbol: "pencil", tip: L10n.toolPencil))
@@ -191,6 +194,7 @@ final class CaptureToolbar: NSView {
         place(saveButton())
         place(actionButton(symbol: "doc.on.doc", tip: L10n.copyCapture, action: #selector(copyShot(_:))))
 
+        addSubview(colorDot)
         frame = NSRect(x: 0, y: 0, width: x + 5, height: height)
     }
 

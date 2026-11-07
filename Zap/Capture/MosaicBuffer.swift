@@ -10,6 +10,26 @@ enum MosaicBuffer {
         rect: CaptureGeometry.PixelRect,
         block: Int
     ) {
+        pixels.withUnsafeMutableBufferPointer { buffer in
+            pixelate(
+                pixels: buffer,
+                width: width,
+                height: height,
+                bytesPerRow: bytesPerRow,
+                rect: rect,
+                block: block
+            )
+        }
+    }
+
+    static func pixelate(
+        pixels: UnsafeMutableBufferPointer<UInt8>,
+        width: Int,
+        height: Int,
+        bytesPerRow: Int,
+        rect: CaptureGeometry.PixelRect,
+        block: Int
+    ) {
         guard width > 0, height > 0, block > 0, bytesPerRow >= width * 4 else { return }
         guard pixels.count >= bytesPerRow * height else { return }
         let area = CaptureGeometry.clamped(rect, imageWidth: width, imageHeight: height)
