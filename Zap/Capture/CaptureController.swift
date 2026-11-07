@@ -96,7 +96,9 @@ final class CaptureController {
         switch outcome {
         case .copied(let data):
             let stored = ClipboardStore.shared.publishCapturedPNG(data, caption: L10n.captureCaption)
-            ToastCenter.shared.show(stored ? L10n.captureCopied : L10n.captureTooLarge)
+            if let message = CaptureCopyNotice.message(storedInHistory: stored) {
+                ToastCenter.shared.show(message)
+            }
             restorePreviousApp()
         case .pinned(let image, let screenFrame):
             let pin = PinWindowController(image: image, screenFrame: screenFrame)

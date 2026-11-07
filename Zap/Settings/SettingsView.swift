@@ -13,9 +13,11 @@ struct SettingsView: View {
         Form {
             Section {
                 HStack(spacing: 12) {
-                    Image(nsImage: NSApp.applicationIconImage)
+                    Image(nsImage: AppIconArtwork.image())
                         .resizable()
+                        .interpolation(.high)
                         .frame(width: 48, height: 48)
+                        .clipShape(RoundedRectangle(cornerRadius: CGFloat(48) * 0.225, style: .continuous))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(L10n.appName)
                             .font(.title2.bold())
