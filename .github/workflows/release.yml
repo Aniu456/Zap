@@ -1,10 +1,8 @@
 # 给公开仓库发布 Apple 芯片和 Intel 两份 Zap.app，并更新 Sparkle 的 appcast。
 #
 # 触发：推送三段版本 tag（v1.0.1），或在该 tag 上手动运行。不要强推已经发出的 tag。
-# 没有 Developer ID 时不公证。单架构构建会削薄已签名的 Sparkle.framework，
-# 留下无效密封（-67056）。打包前用临时身份 codesign -s - 由内向外重封，
-# 让 Sparkle 2.10.1 的 generate_appcast 通过检查。这不是 Developer ID，
-# 第一次打开仍要 Control-点按后选「打开」。
+# 没有 Developer ID 时，给嵌入后的 Sparkle.framework 和外层 Zap.app 做临时签名。
+# 这样 arm64 链接器签名的主程序也有完整的应用资源封印。工作流不做公证。
 # 三个 Apple secret 都存在时，才改用 Developer ID 签名，不再做临时重封。公证不在这个工作流里。
 # Sparkle 2.10.1 不会在同一个 generate_appcast 里接受同一版本的两份安装包。
 # 每种架构单独签名进自己的 feed；已安装的通用包仍读取合并后的 appcast.xml。
@@ -189,15 +187,13 @@ jobs:
           # 每种架构单独跑 generate_appcast。同一版本的两份 zip 放进同一目录会被
           # Sparkle 2.10.1 当成重复更新而拒绝。arm64 可执行文件会自动写入
           # sparkle:hardwareRequirements。
-          # generate_appcast 发现包上有签名就会校验。单架构包削薄 Sparkle 后
-          # 密封无效，--disable-nested-code-check 也跳不过。临时身份只用于重封。
+          # Xcode 嵌入框架时会移除 Headers 和 Modules。保留框架内各 helper 的原签名，
+          # 先重新封装框架，再签外层应用，最后递归校验整个包。
           seal_adhoc() {
             local app="$1"
-            find "$app" -depth -type d \( -name '*.xpc' -o -name '*.app' -o -name '*.framework' \) -print0 |
-              while IFS= read -r -d '' bundle; do
-                codesign --force --sign - "$bundle"
-              done
-            codesign --verify --strict "$app"
+            codesign --force --sign - "$app/Contents/Frameworks/Sparkle.framework"
+            codesign --force --sign - "$app"
+            codesign --verify --deep --strict "$app"
           }
 
           sign_one() {
