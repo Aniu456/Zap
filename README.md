@@ -222,7 +222,7 @@ tar -xJf Sparkle-2.10.1.tar.xz
 
 两个必须是一对。发布脚本会把公钥写进 `Zap.app` 的 Info.plist，再用私钥给 zip 做 EdDSA 签名。对不上的话，Actions 会在生成 appcast 时失败，不会发出一个无法验证的包。
 
-下面这些是以后改用 Developer ID 时才需要的。现在不填，工作流就用 `CODE_SIGNING_ALLOWED=NO` 打未签名的包：
+下面这些是以后改用 Developer ID 时才需要的。现在不填，工作流就用 `CODE_SIGNING_ALLOWED=NO` 编译：
 
 | Secret | 内容 |
 | --- | --- |
@@ -231,7 +231,7 @@ tar -xJf Sparkle-2.10.1.tar.xz
 | `APPLE_SIGNING_IDENTITY` | 例如 `Developer ID Application: 名字 (TEAMID)` |
 | `APPLE_TEAM_ID` | 10 位 Team ID。证书里已经带了团队时可以不填 |
 
-这个工作流**不会**做 Apple 公证，也不读取公证专用的 secret。免费的 Personal Team 可以继续在自己的 Mac 上编译运行。对外下载的未签名包，第一次打开时 Gatekeeper 可能提示无法验证开发者：在访达里按住 Control 点按 `Zap.app`，选择「打开」。以后如果买了 Apple Developer Program，配上表里的证书 secret，同一次 tag 构建会改为 Developer ID 签名。要去掉首次打开的警告，还需要另做公证和 stapler，那一步还没放进这个工作流。
+这个工作流**不会**做 Apple 公证，也不读取公证专用的 secret。免费的 Personal Team 可以继续在自己的 Mac 上编译运行。没有 Developer ID 时，单架构包会把已签名的 Sparkle 框架削薄，密封失效，Sparkle 2.10.1 的 `generate_appcast` 会拒绝。打包前用临时身份 `codesign -s -` 由内向外重封。这不是 Developer ID。第一次打开时 Gatekeeper 仍可能提示无法验证开发者：在访达里按住 Control 点按 `Zap.app`，选择「打开」。以后如果买了 Apple Developer Program，配上表里的证书 secret，同一次 tag 构建会改为 Developer ID 签名，不再做这次临时重封。要去掉首次打开的警告，还需要另做公证和 stapler，那一步还没放进这个工作流。
 
 ### 3. 推送 tag
 

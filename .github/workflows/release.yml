@@ -1,8 +1,11 @@
 # 给公开仓库发布 Apple 芯片和 Intel 两份 Zap.app，并更新 Sparkle 的 appcast。
 #
 # 触发：推送三段版本 tag（v1.0.1），或在该 tag 上手动运行。不要强推已经发出的 tag。
-# 默认不签名、不公证。本机第一次打开可能被 Gatekeeper 拦住，Control-点按后选「打开」。
-# 三个 Apple secret 都存在时，才改用 Developer ID 签名。公证不在这个工作流里。
+# 没有 Developer ID 时不公证。单架构构建会削薄已签名的 Sparkle.framework，
+# 留下无效密封（-67056）。打包前用临时身份 codesign -s - 由内向外重封，
+# 让 Sparkle 2.10.1 的 generate_appcast 通过检查。这不是 Developer ID，
+# 第一次打开仍要 Control-点按后选「打开」。
+# 三个 Apple secret 都存在时，才改用 Developer ID 签名，不再做临时重封。公证不在这个工作流里。
 # Sparkle 2.10.1 不会在同一个 generate_appcast 里接受同一版本的两份安装包。
 # 每种架构单独签名进自己的 feed；已安装的通用包仍读取合并后的 appcast.xml。
 name: Release
@@ -156,6 +159,7 @@ jobs:
       - name: 打包并生成 appcast
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          SIGNED: ${{ steps.sign.outputs.sign }}
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
@@ -185,13 +189,28 @@ jobs:
           # 每种架构单独跑 generate_appcast。同一版本的两份 zip 放进同一目录会被
           # Sparkle 2.10.1 当成重复更新而拒绝。arm64 可执行文件会自动写入
           # sparkle:hardwareRequirements。
+          # generate_appcast 发现包上有签名就会校验。单架构包削薄 Sparkle 后
+          # 密封无效，--disable-nested-code-check 也跳不过。临时身份只用于重封。
+          seal_adhoc() {
+            local app="$1"
+            find "$app" -depth -type d \( -name '*.xpc' -o -name '*.app' -o -name '*.framework' \) -print0 |
+              while IFS= read -r -d '' bundle; do
+                codesign --force --sign - "$bundle"
+              done
+            codesign --verify --strict "$app"
+          }
+
           sign_one() {
             local slug="$1"
             local work="$RUNNER_TEMP/archives-${slug}"
             local zip="Zap-${VERSION}-${slug}.zip"
+            local app="$RUNNER_TEMP/apps/${slug}/Zap.app"
+            if [ "${SIGNED}" != "1" ]; then
+              seal_adhoc "$app"
+            fi
             mkdir -p "$work"
             ditto -c -k --sequesterRsrc --keepParent \
-              "$RUNNER_TEMP/apps/${slug}/Zap.app" "$work/${zip}"
+              "$app" "$work/${zip}"
             cat > "$work/Zap-${VERSION}-${slug}.html" << EOF
           <h2>一闪 ${VERSION}</h2>
           <p>启动器、剪贴板历史，以及带标注和置顶的区域截图。历史只留在本机。</p>
