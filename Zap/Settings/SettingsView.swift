@@ -7,6 +7,8 @@ struct SettingsView: View {
     @ObservedObject private var access = AccessibilityPermission.shared
     @ObservedObject private var screenRecording = ScreenRecordingPermission.shared
     @ObservedObject private var clipboard = ClipboardStore.shared
+    @ObservedObject private var themes = ThemeController.shared
+    @Environment(\.colorScheme) private var colorScheme
     @State private var confirmClear = false
 
     var body: some View {
@@ -21,8 +23,9 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(L10n.appName)
                             .font(.title2.bold())
+                            .foregroundStyle(colors.primary)
                         Text(versionSubtitle)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(colors.secondary)
                     }
                 }
                 .padding(.vertical, 4)
@@ -34,11 +37,11 @@ struct SettingsView: View {
                     Text(L10n.aboutPrivacy)
                 }
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(colors.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 Text(L10n.aboutCopyright)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(colors.secondary)
                 HStack {
                     Button(L10n.checkForUpdates) {
                         (NSApp.delegate as? AppDelegate)?.checkForUpdates(nil)
@@ -47,6 +50,21 @@ struct SettingsView: View {
                         Link(L10n.github, destination: github)
                     }
                 }
+            }
+
+            Section {
+                Picker(L10n.appearance, selection: themeSelection) {
+                    ForEach(ZapTheme.allCases) { theme in
+                        Text(theme.title).tag(theme)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                Text(L10n.themeHelp)
+                    .font(.callout)
+                    .foregroundStyle(colors.secondary)
+            } header: {
+                Text(L10n.appearance)
             }
 
             Section {
@@ -167,6 +185,9 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 560)
+        .tint(colors.accent)
+        .scrollContentBackground(colors.vibrancy > 0.5 ? .visible : .hidden)
+        .background(colors.background.opacity(colors.cover))
         .environment(\.locale, Locale(identifier: "zh-Hans-SG"))
         .alert(L10n.clearTitle, isPresented: $confirmClear) {
             Button(L10n.clearConfirm, role: .destructive) {
@@ -184,6 +205,17 @@ struct SettingsView: View {
             access.refresh()
             screenRecording.refresh()
         }
+    }
+
+    private var colors: ZapColors {
+        themes.colors(dark: colorScheme == .dark)
+    }
+
+    private var themeSelection: Binding<ZapTheme> {
+        Binding(
+            get: { themes.theme },
+            set: { themes.setTheme($0) }
+        )
     }
 
     private var versionSubtitle: String {

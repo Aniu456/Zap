@@ -318,6 +318,23 @@ final class PaletteChrome: NSVisualEffectView {
         wantsLayer = true
         layer?.cornerRadius = 16
         layer?.masksToBounds = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(refreshTheme),
+            name: .zapThemeChanged,
+            object: nil
+        )
+        refreshTheme()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func refreshTheme() {
+        let amount = ThemeController.shared.vibrancyAmount()
+        state = amount > 0.02 ? .active : .inactive
+        isEmphasized = amount > 0.5
     }
 
     @available(*, unavailable)

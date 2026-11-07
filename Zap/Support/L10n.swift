@@ -96,6 +96,10 @@ enum L10n {
     static let aboutCapture = "区域截图：框选画面，画箭头、方框、铅笔、记号笔、马赛克和文字，然后复制、保存，或置顶成贴图。"
     static let aboutPrivacy = "剪贴板、截图和搜索都留在这台 Mac 上，不会上传。"
     static let aboutCopyright = "© 2026 Benny · MIT"
+    static let appearance = "外观"
+    static let themeMuse = "Muse"
+    static let themeSpotlight = "系统聚焦"
+    static let themeHelp = "Muse 是近白或近黑的底，配同一支蓝色。系统聚焦用 macOS 的毛玻璃和系统选中色。两种都会跟着系统的浅色、深色走。"
     static let github = "GitHub"
     static let githubURL = "https://github.com/Aniu456/Zap"
 

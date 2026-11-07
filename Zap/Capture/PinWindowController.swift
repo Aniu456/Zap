@@ -78,7 +78,13 @@ final class PinContentView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.borderWidth = 1
-        layer?.borderColor = NSColor.white.withAlphaComponent(0.9).cgColor
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(refreshTheme),
+            name: .zapThemeChanged,
+            object: nil
+        )
+        refreshTheme()
         closeButton.isBordered = false
         closeButton.bezelStyle = .circular
         closeButton.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: L10n.closePin)
@@ -102,7 +108,21 @@ final class PinContentView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
     override var acceptsFirstResponder: Bool { true }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshTheme()
+    }
+
+    @objc private func refreshTheme() {
+        let color = ThemeController.shared.nsColor(.separator, appearance: effectiveAppearance)
+        layer?.borderColor = color.cgColor
+    }
 
     override func layout() {
         super.layout()

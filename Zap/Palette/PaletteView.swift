@@ -7,6 +7,7 @@ struct PaletteView: View {
     @ObservedObject private var clipboard = ClipboardStore.shared
     @ObservedObject private var access = AccessibilityPermission.shared
     @ObservedObject private var settings = SettingsStore.shared
+    @ObservedObject private var themes = ThemeController.shared
     @FocusState private var fieldFocused: Bool
     @Environment(\.displayScale) private var displayScale
     @Environment(\.colorScheme) private var colorScheme
@@ -14,7 +15,7 @@ struct PaletteView: View {
     var body: some View {
         VStack(spacing: 0) {
             searchRow
-            Divider()
+            Divider().overlay(colors.separator)
             resultList
             if let warning = clipboard.limitWarning, palette.mode == .clipboard {
                 pinnedLimitBanner(L10n.clipboardLimitWarning(warning))
@@ -22,13 +23,14 @@ struct PaletteView: View {
             if palette.mode == .clipboard && !access.isTrusted {
                 permissionBanner
             }
-            Divider()
+            Divider().overlay(colors.separator)
             footer
         }
         .frame(width: 640, height: 480)
+        .background(colors.background.opacity(colors.cover))
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
+                .strokeBorder(colors.separator, lineWidth: 1)
         )
         .onAppear { focusField() }
         .onChange(of: palette.isPresented) { _, shown in
@@ -43,20 +45,33 @@ struct PaletteView: View {
         HStack(spacing: 10) {
             Image(systemName: palette.mode == .launcher ? "magnifyingglass" : "doc.on.clipboard")
                 .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(colors.secondary)
                 .frame(width: 20)
             TextField(placeholder, text: $palette.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 18))
+                .foregroundStyle(colors.primary)
                 .focused($fieldFocused)
                 .autocorrectionDisabled()
                 .id(palette.fieldToken)
+                .padding(.horizontal, colors.searchIsPill ? 12 : 0)
+                .padding(.vertical, colors.searchIsPill ? 6 : 0)
+                .background {
+                    if colors.searchIsPill {
+                        Capsule().fill(colors.inputFill)
+                    }
+                }
+                .overlay {
+                    if colors.searchIsPill {
+                        Capsule().strokeBorder(fieldFocused ? colors.accent : colors.inputStroke, lineWidth: fieldFocused ? 1.5 : 1)
+                    }
+                }
             if !palette.query.isEmpty {
                 Button {
                     palette.query = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(colors.secondary)
                 }
                 .buttonStyle(.plain)
             }
@@ -96,10 +111,11 @@ struct PaletteView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             highlighted(row.app.name, indices: row.match.indices)
                                 .lineLimit(1)
+                                .foregroundStyle(colors.primary)
                             if duplicates.contains(row.app.name) {
                                 Text(locationHint(row.app))
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(colors.secondary)
                                     .lineLimit(1)
                             }
                         }
@@ -187,27 +203,28 @@ struct PaletteView: View {
                 HStack(spacing: 10) {
                     if selected && !palette.selectedClipIDs.isEmpty {
                         Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(colors.accent)
                             .accessibilityHidden(true)
                     }
                     clipIcon(item)
                     highlighted(item.displayText, indices: indices.filter { $0 < item.displayText.count })
                         .lineLimit(1)
+                        .foregroundStyle(colors.primary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if item.pinnedAt != nil {
                         Image(systemName: "pin.fill")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(colors.accent)
                     }
                     if ClipboardPolicy.showsStoredSize(of: item) {
                         Text(DiskUsageFormat.bytes(item.byteCount))
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(colors.secondary)
                             .layoutPriority(1)
                     }
                     Text(RelativeTime.string(from: item.createdAt))
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(colors.secondary)
                         .layoutPriority(1)
                 }
                 .frame(maxWidth: .infinity, minHeight: 44)
@@ -261,15 +278,15 @@ struct PaletteView: View {
         } else if item.kind == .image {
             Image(systemName: "photo")
                 .font(.system(size: 16))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(colors.secondary)
                 .frame(width: 32, height: 32)
-                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .background(colors.keycap, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         } else {
             Image(systemName: "text.alignleft")
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(colors.secondary)
                 .frame(width: 32, height: 32)
-                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .background(colors.keycap, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
     }
 
@@ -278,11 +295,11 @@ struct PaletteView: View {
             Spacer()
             Text(title)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(colors.secondary)
             if let message {
                 Text(message)
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(colors.secondary)
                     .multilineTextAlignment(.center)
             }
             Spacer()
@@ -294,24 +311,24 @@ struct PaletteView: View {
     private func pinnedLimitBanner(_ message: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(colors.warning)
             Text(message)
                 .font(.caption)
-                .foregroundStyle(.primary)
+                .foregroundStyle(colors.primary)
             Spacer(minLength: 8)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(Color.orange.opacity(0.12))
+        .background(colors.warning.opacity(0.14))
     }
 
     private var permissionBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.circle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(colors.warning)
             Text(L10n.accessibilityBanner)
                 .font(.caption)
-                .foregroundStyle(.primary)
+                .foregroundStyle(colors.primary)
             Spacer(minLength: 8)
             Button(L10n.grantAccess) {
                 AccessibilityPermission.shared.prompt()
@@ -320,7 +337,7 @@ struct PaletteView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(Color.orange.opacity(0.12))
+        .background(colors.warning.opacity(0.14))
     }
 
     private var footer: some View {
@@ -347,7 +364,7 @@ struct PaletteView: View {
             Spacer()
             Text(palette.mode == .launcher ? settings.launcherHotkey.displayString : settings.clipboardHotkey.displayString)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(colors.secondary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -359,10 +376,10 @@ struct PaletteView: View {
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
-                .foregroundStyle(.primary)
-                .background(keycapFill, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .foregroundStyle(colors.primary)
+                .background(colors.keycap, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
             Text(label)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(colors.secondary)
         }
         .font(.system(size: 11))
     }
@@ -401,22 +418,13 @@ struct PaletteView: View {
         return min(palette.selectedIndex, count - 1)
     }
 
-    /// Graphite selection. The asset accent used to be yellow, and a 22% wash
-    /// of it was the peach bar in light mode and the muddy gold bar in dark mode.
+    private var colors: ZapColors {
+        themes.colors(dark: colorScheme == .dark)
+    }
+
     private func rowFill(selected: Bool) -> some View {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(selected ? selectionFill : Color.clear)
-    }
-
-    private var selectionFill: Color {
-        if colorScheme == .dark {
-            return Color.white.opacity(0.22)
-        }
-        return Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
-    }
-
-    private var keycapFill: Color {
-        Color.primary.opacity(colorScheme == .dark ? 0.18 : 0.10)
+            .fill(selected ? colors.selection : Color.clear)
     }
 
     private func focusField() {
