@@ -16,6 +16,27 @@
 
 英文名是 Zap，界面是简体中文，面向 zh-Hans-SG。
 
+## 下载
+
+到 [GitHub Releases](https://github.com/Aniu456/Zap/releases) 下载安装包。除了已经发出的 `v1.0.0`，每个版本有两份正式压缩包，按这台 Mac 的芯片选一份：
+
+| 这台 Mac | 下载 |
+| --- | --- |
+| Apple 芯片（M 系列） | `Zap-<版本>-apple-silicon.zip` |
+| Intel | `Zap-<版本>-intel.zip` |
+
+M 系列 Mac 用 Apple 芯片版，Intel Mac 用 Intel 版。芯片写在苹果菜单 → 关于本机。M1、M2、M3、M4 以及以后的 M 系列都是 Apple 芯片。
+
+安装：
+
+1. 解压下载的 zip。
+2. 把里面的 `Zap.app` 拖进「应用程序」文件夹。
+3. 打开后，菜单栏里的名字是「一闪」。它不出现在程序坞。
+
+这些构建默认没有做 Apple 公证。第一次打开如果系统提示无法验证开发者：在访达里按住 Control 点按 `Zap.app`，选择「打开」。
+
+`v1.0.0` 仍是一份同时包含两种芯片的 `Zap-1.0.0.zip`，两种 Mac 都可以装。那个 tag 不再改写。
+
 ## 环境
 
 - macOS 14 或更高
@@ -151,9 +172,21 @@ https://github.com/Aniu456/Zap/releases/latest/download/appcast.xml
 
 正式包在构建时写入 EdDSA 公钥（`SUPublicEDKey`）。Sparkle 用它核对安装包的签名，再请你确认安装。私钥只放在 GitHub Actions 的 secret 里，仓库里没有私钥。
 
-从 Xcode Run 出来的调试包没有这把公钥，自动检查也关着。要试更新，请安装 Release 里的 zip。
+Apple 芯片安装包的更新地址是：
 
-第一次发布之前，上面的地址还不存在，「检查更新…」会失败。推送 tag `v1.0.0` 并且 Actions 成功之后才有可装的包。
+```
+https://github.com/Aniu456/Zap/releases/latest/download/appcast-apple-silicon.xml
+```
+
+Intel 安装包的更新地址是：
+
+```
+https://github.com/Aniu456/Zap/releases/latest/download/appcast-intel.xml
+```
+
+仓库里的默认地址仍是上面的 `appcast.xml`。`v1.0.0` 的通用包继续用它。这份合并列表里，Apple 芯片的条目排在前面，并带 Sparkle 2.9 起的 `sparkle:hardwareRequirements`（值为 `arm64`）；Intel 的条目没有这项要求。Intel 机会跳过 Apple 芯片的包。Apple 芯片上如果两条版本号相同，Sparkle 2.10.1 会采用排在前面的那一条。
+
+从 Xcode Run 出来的调试包没有这把公钥，自动检查也关着。要试更新，请安装 Release 里对应芯片的 zip。
 
 ## 发布第 1 版
 
@@ -205,16 +238,21 @@ tar -xJf Sparkle-2.10.1.tar.xz
 ```bash
 git checkout main
 git pull origin main
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.0.1
+git push origin v1.0.1
 ```
 
-推送之后打开 Actions 里的 Release 工作流。成功时，<https://github.com/Aniu456/Zap/releases/tag/v1.0.0> 上会有：
+`v1.0.0` 已经发布，附件是通用包 `Zap-1.0.0.zip` 和 `appcast.xml`。不要强推这个 tag，也不要改写已经发出的附件。
 
-- `Zap-1.0.0.zip`：解压后是 `Zap.app`
-- `appcast.xml`：Sparkle 的更新列表
+下一次发布用更大的三段版本，例如 `v1.0.1`。工作流在 `macos-15` 上分别用 `ARCHS=arm64` 和 `ARCHS=x86_64` 编译，各自打包。成功时，Release 上会有：
 
-下一次发布用更大的三段版本，例如 `v1.0.1`。工作流用 tag 覆盖应用里的营销版本和构建号，并把旧的 appcast 条目接在新条目后面。每条安装包的下载地址留在它自己的 tag 上。当前发布的是完整 zip。Sparkle 支持增量包；这个工作流先关闭增量（`--maximum-deltas 0`），避免未签名构建产生对不上的差分文件。
+- `Zap-1.0.1-apple-silicon.zip`：只含 Apple 芯片
+- `Zap-1.0.1-intel.zip`：只含 Intel
+- `appcast-apple-silicon.xml`：写进 Apple 芯片包的更新地址。`generate_appcast` 看到没有 Intel 切片时，会加上 `sparkle:hardwareRequirements` 为 `arm64`
+- `appcast-intel.xml`：写进 Intel 包的更新地址，不声明硬件要求
+- `appcast.xml`：把上面两条新版本叠在旧的通用包条目前面，给仍安装着 `v1.0.0` 的人用
+
+两种架构分开跑 `generate_appcast`。Sparkle 2.10.1 用构建号当作唯一键，同一目录里放两份相同版本的 zip 会被拒绝。工作流用 tag 覆盖应用里的营销版本和构建号，并把旧的 appcast 条目接在新条目后面。每条安装包的下载地址留在它自己的 tag 上。当前发布的是完整 zip。Sparkle 支持增量包；这个工作流先关闭增量（`--maximum-deltas 0`），避免未签名构建产生对不上的差分文件。
 
 不要把 tag 强推到已经发出去的版本上。用户手里的包按构建号判断新旧。
 
@@ -317,7 +355,7 @@ Zap/Hotkeys            全局快捷键，可在设置里改
 Zap/Capture            区域截图、标注、复制和置顶
 ZapTests               模糊匹配、历史去重、选区和马赛克的单元测试
 .github/workflows/release.yml
-                       tag 发布：编译、zip、appcast、GitHub Release
+                       tag 发布：分别编译 arm64 与 x86_64，打两份 zip，生成 appcast
 ThirdParty/Sparkle     Sparkle 的许可文本
 ```
 

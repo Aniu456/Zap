@@ -3,8 +3,10 @@
 <plist version="1.0">
 <dict>
 	<!--
-	  发布工作流会复制这份文件，并把 SPARKLE_PUBLIC_KEY 写入 SUPublicEDKey。
-	  这里只放可以公开的更新地址。不要把 EdDSA 私钥写进仓库。
+	  发布工作流会复制这份文件，并把公钥写入 SUPublicEDKey。
+	  本地构建沿用下面的 appcast.xml。发布时按架构改成
+	  appcast-apple-silicon.xml 或 appcast-intel.xml。
+	  不要把 EdDSA 私钥写进仓库。
 	-->
 	<key>SUFeedURL</key>
 	<string>https://github.com/Aniu456/Zap/releases/latest/download/appcast.xml</string>

@@ -21,14 +21,32 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(L10n.appName)
                             .font(.title2.bold())
-                        Text("Zap · \(L10n.tagline)")
+                        Text(versionSubtitle)
                             .foregroundStyle(.secondary)
                     }
                 }
                 .padding(.vertical, 4)
-                Text(L10n.laterCapture)
-                    .font(.callout)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(L10n.aboutIntro)
+                    Text(L10n.aboutLauncher)
+                    Text(L10n.aboutClipboard)
+                    Text(L10n.aboutCapture)
+                    Text(L10n.aboutPrivacy)
+                }
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(L10n.aboutCopyright)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                HStack {
+                    Button(L10n.checkForUpdates) {
+                        (NSApp.delegate as? AppDelegate)?.checkForUpdates(nil)
+                    }
+                    if let github = URL(string: L10n.githubURL) {
+                        Link(L10n.github, destination: github)
+                    }
+                }
             }
 
             Section {
@@ -137,9 +155,6 @@ struct SettingsView: View {
             }
 
             Section {
-                Text(versionText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 Text(L10n.updatesHelp)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -171,10 +186,11 @@ struct SettingsView: View {
         }
     }
 
-    private var versionText: String {
-        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
-        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
-        return "版本 \(short) (\(build))"
+    private var versionSubtitle: String {
+        AppVersion.subtitle(
+            short: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+            build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        )
     }
 }
 

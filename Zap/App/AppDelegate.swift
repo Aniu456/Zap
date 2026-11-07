@@ -103,8 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showAbout() {
-        NSApp.activate()
-        NSApp.orderFrontStandardAboutPanel(nil)
+        SettingsWindowController.shared.show()
     }
 
     @objc private func showSettings() {
