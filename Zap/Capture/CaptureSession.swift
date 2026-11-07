@@ -447,7 +447,10 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
     private func exportRender() -> (image: CGImage, screenFrame: NSRect)? {
         guard let crop, let selection, let displayID = activeDisplay,
               let shot = shots.first(where: { $0.displayID == displayID }) else { return nil }
-        let rendered = CaptureRenderer.render(base: crop, marks: marks) ?? crop
+        guard let rendered = CaptureRenderer.render(base: crop, marks: marks) else {
+            showToast(L10n.captureRenderFailed)
+            return nil
+        }
         let pointSize = NSSize(width: max(selection.width, 1), height: max(selection.height, 1))
         let screenFrame = NSRect(
             x: shot.frame.minX + selection.minX,

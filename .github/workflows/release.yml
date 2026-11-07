@@ -186,10 +186,14 @@ jobs:
             "$ARCHIVES"
 
           PREV="$RUNNER_TEMP/appcast-previous.xml"
-          if ! curl -fsSL -o "$PREV" \
-            "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/appcast.xml"; then
-            rm -f "$PREV"
-          fi
+          status=$(curl --silent --show-error --location --retry 3 --retry-all-errors \
+            --connect-timeout 10 --max-time 60 --output "$PREV" --write-out '%{http_code}' \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/appcast.xml")
+          case "$status" in
+            200) ;;
+            404) rm -f "$PREV" ;;
+            *) echo "读取旧 appcast 失败 (HTTP $status)" >&2; exit 1 ;;
+          esac
           python3 scripts/merge_appcast.py \
             "$RUNNER_TEMP/appcast-new.xml" \
             "$PREV" \

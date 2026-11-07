@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 @testable import Zap
 
 final class FuzzyMatcherTests: XCTestCase {
@@ -184,5 +185,115 @@ final class ClipboardPolicyTests: XCTestCase {
         XCTAssertTrue(ClipboardPolicy.acceptsImageByteCount(100))
         XCTAssertFalse(ClipboardPolicy.acceptsImageByteCount(ClipboardPolicy.maxImageBytes + 1))
         XCTAssertTrue(ClipboardPolicy.acceptsImageByteCount(ClipboardPolicy.maxImageBytes))
+    }
+}
+
+final class ClipboardPersistenceTests: XCTestCase {
+    func testScheduledWritePersistsWithoutExplicitFlush() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let writer = ClipboardPersistence()
+        let latest = item("latest")
+        writer.schedule(items: [item("older")], directory: directory)
+        writer.schedule(items: [latest], directory: directory)
+        let saved = expectation(description: "Scheduled history save")
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.6) {
+            do {
+                let data = try Data(contentsOf: directory.appendingPathComponent("history.json"))
+                XCTAssertEqual(try JSONDecoder().decode([ClipboardItem].self, from: data), [latest])
+            } catch {
+                XCTFail("Scheduled write failed: \(error)")
+            }
+            saved.fulfill()
+        }
+        wait(for: [saved], timeout: 5)
+    }
+
+    private func item(_ value: String, image: String? = nil) -> ClipboardItem {
+        ClipboardItem(id: UUID(), kind: image == nil ? .text : .image, text: value,
+                      imageFilename: image, contentHash: value, createdAt: Date(), byteCount: value.utf8.count)
+    }
+
+    func testFlushWritesLatestSnapshotAndThenRemovesOldImage() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let images = directory.appendingPathComponent("images")
+        try FileManager.default.createDirectory(at: images, withIntermediateDirectories: true)
+        let old = item("old", image: "old.png")
+        let kept = item("kept", image: "kept.png")
+        try Data([1]).write(to: images.appendingPathComponent("old.png"))
+        try Data([2]).write(to: images.appendingPathComponent("kept.png"))
+        let writer = ClipboardPersistence()
+        writer.schedule(items: [old, kept], directory: directory)
+        XCTAssertTrue(writer.flush())
+        writer.removeAfterSave(["old.png", "kept.png"], directory: directory)
+        writer.schedule(items: [old], directory: directory)
+        writer.schedule(items: [kept], directory: directory)
+        XCTAssertTrue(writer.flush())
+        let saved = try JSONDecoder().decode([ClipboardItem].self, from: Data(contentsOf: directory.appendingPathComponent("history.json")))
+        XCTAssertEqual(saved, [kept])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: images.appendingPathComponent("old.png").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: images.appendingPathComponent("kept.png").path))
+    }
+
+    func testFailedWriteKeepsSnapshotForRetry() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let latest = item("latest")
+        let writer = ClipboardPersistence()
+        writer.schedule(items: [latest], directory: directory)
+        XCTAssertFalse(writer.flush())
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        XCTAssertTrue(writer.flush())
+        let saved = try JSONDecoder().decode([ClipboardItem].self, from: Data(contentsOf: directory.appendingPathComponent("history.json")))
+        XCTAssertEqual(saved, [latest])
+    }
+
+    @MainActor
+    func testRankingInvalidatesAfterPinDeleteAndInsertion() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = ClipboardStore(directory: directory)
+        store.recordText("first")
+        let first = try XCTUnwrap(store.items.first)
+        XCTAssertEqual(store.ranked(matching: "").map(\.id), [first.id])
+        store.recordText("second")
+        let second = try XCTUnwrap(store.items.first)
+        XCTAssertEqual(store.ranked(matching: "").map(\.id), [second.id, first.id])
+        store.togglePin(first.id)
+        XCTAssertEqual(store.ranked(matching: "  ").map(\.id), [first.id, second.id])
+        XCTAssertNotNil(store.ranked(matching: "first").first?.item.pinnedAt)
+        store.delete([first.id])
+        XCTAssertTrue(store.ranked(matching: "first").isEmpty)
+        store.removeAll()
+        XCTAssertTrue(store.ranked(matching: "").isEmpty)
+        XCTAssertTrue(store.flush())
+    }
+
+    @MainActor
+    func testThumbnailUsesRequestedPixelSizeAndLeavesOriginalIntact() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory.appendingPathComponent("images"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: 1024, pixelsHigh: 512, bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0
+        ))
+        let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        let store = ClipboardStore(directory: directory)
+        store.recordImageData(data, caption: nil)
+        let clip = try XCTUnwrap(store.items.first)
+        let small = try XCTUnwrap(store.thumbnail(for: clip, scale: 1))
+        let retina = try XCTUnwrap(store.thumbnail(for: clip, scale: 2))
+        XCTAssertEqual(small.representations.first?.pixelsWide, 32)
+        XCTAssertEqual(retina.representations.first?.pixelsWide, 64)
+        XCTAssertTrue(retina === store.thumbnail(for: clip, scale: 2))
+        let original = directory.appendingPathComponent("images").appendingPathComponent(try XCTUnwrap(clip.imageFilename))
+        XCTAssertEqual(try Data(contentsOf: original), data)
+        XCTAssertTrue(store.flush())
     }
 }
