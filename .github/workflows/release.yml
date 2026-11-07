@@ -1,0 +1,226 @@
+# 给公开仓库发布可下载的 Zap.app，并更新 Sparkle 的 appcast。
+#
+# 触发：推送三段版本 tag（v1.0.0），或在该 tag 上手动运行。
+# 默认不签名、不公证。本机第一次打开可能被 Gatekeeper 拦住，Control-点按后选「打开」。
+# 三个 Apple secret 都存在时，才改用 Developer ID 签名。公证不在这个工作流里。
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: 构建并发布
+    runs-on: macos-15
+    steps:
+      - name: 检出
+        uses: actions/checkout@v4
+
+      - name: 确认 tag
+        id: version
+        run: |
+          set -euo pipefail
+          if [[ ! "${GITHUB_REF}" =~ ^refs/tags/v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "请在三段版本 tag 上运行，例如 v1.0.0。当前 ref：${GITHUB_REF}"
+            exit 1
+          fi
+          echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+
+      - name: 检查 Sparkle 密钥
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SPARKLE_PRIVATE_KEY}" ] || [ -z "${SPARKLE_PUBLIC_KEY}" ]; then
+            echo "发布需要两个 Actions secret：SPARKLE_PRIVATE_KEY 和 SPARKLE_PUBLIC_KEY。"
+            echo "生成步骤在 README「发布第 1 版」。私钥不能提交到仓库。"
+            exit 1
+          fi
+
+      - name: 是否使用 Developer ID
+        id: sign
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${APPLE_CERTIFICATE_P12_BASE64}" ] && [ -n "${APPLE_CERTIFICATE_PASSWORD}" ] && [ -n "${APPLE_SIGNING_IDENTITY}" ]; then
+            echo "sign=1" >> "$GITHUB_OUTPUT"
+            echo "将使用 Developer ID 签名。这个工作流不做公证。"
+          else
+            echo "sign=0" >> "$GITHUB_OUTPUT"
+            echo "未配置完整的 Developer ID secret，按未签名构建（CODE_SIGNING_ALLOWED=NO）。"
+          fi
+
+      - name: 导入 Developer ID
+        if: steps.sign.outputs.sign == '1'
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          echo "$APPLE_CERTIFICATE_P12_BASE64" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERT_PATH" -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          rm -f "$CERT_PATH"
+
+      - name: 构建 Zap.app
+        env:
+          SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          PLIST="$RUNNER_TEMP/Sparkle-Info.plist"
+          cp Config/Sparkle-Info.plist "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string ${SPARKLE_PUBLIC_KEY}" "$PLIST"
+
+          SIGN_ARGS=(
+            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_REQUIRED=NO
+            CODE_SIGN_IDENTITY=
+          )
+          if [ "${{ steps.sign.outputs.sign }}" = "1" ]; then
+            SIGN_ARGS=(
+              CODE_SIGN_STYLE=Manual
+              "CODE_SIGN_IDENTITY=${APPLE_SIGNING_IDENTITY}"
+              CODE_SIGNING_REQUIRED=YES
+              CODE_SIGNING_ALLOWED=YES
+              ENABLE_HARDENED_RUNTIME=YES
+              OTHER_CODE_SIGN_FLAGS=--timestamp
+            )
+            if [ -n "${APPLE_TEAM_ID}" ]; then
+              SIGN_ARGS+=("DEVELOPMENT_TEAM=${APPLE_TEAM_ID}")
+            fi
+          fi
+
+          xcodebuild \
+            -project Zap.xcodeproj \
+            -scheme Zap \
+            -configuration Release \
+            -destination "generic/platform=macOS" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            ARCHS="arm64 x86_64" \
+            ONLY_ACTIVE_ARCH=NO \
+            MARKETING_VERSION="${{ steps.version.outputs.version }}" \
+            CURRENT_PROJECT_VERSION="${{ steps.version.outputs.version }}" \
+            INFOPLIST_FILE="$PLIST" \
+            "${SIGN_ARGS[@]}"
+
+          APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/Zap.app"
+          INFO="$APP/Contents/Info.plist"
+          test -d "$APP"
+          test "$(plutil -extract CFBundleShortVersionString raw -o - "$INFO")" = "${{ steps.version.outputs.version }}"
+          test "$(plutil -extract CFBundleVersion raw -o - "$INFO")" = "${{ steps.version.outputs.version }}"
+          test "$(plutil -extract SUPublicEDKey raw -o - "$INFO")" = "${SPARKLE_PUBLIC_KEY}"
+          test "$(plutil -extract SUFeedURL raw -o - "$INFO")" = "https://github.com/Aniu456/Zap/releases/latest/download/appcast.xml"
+
+      - name: 打包并生成 appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          APP="$RUNNER_TEMP/DerivedData/Build/Products/Release/Zap.app"
+          ARCHIVES="$RUNNER_TEMP/archives"
+          KEY_FILE="$RUNNER_TEMP/sparkle_ed_private_key"
+          export KEY_FILE
+          mkdir -p "$ARCHIVES" dist
+          umask 077
+          cleanup() { rm -f "$KEY_FILE"; }
+          trap cleanup EXIT
+          python3 - << 'PY'
+          import os
+          from pathlib import Path
+          raw = os.environ["SPARKLE_PRIVATE_KEY"]
+          Path(os.environ["KEY_FILE"]).write_text("".join(raw.split()) + "\n", encoding="utf-8")
+          PY
+
+          SPARKLE_VERSION=2.10.1
+          curl -fsSL -o "$RUNNER_TEMP/Sparkle.tar.xz" \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+          mkdir -p "$RUNNER_TEMP/sparkle-tools"
+          tar -xJf "$RUNNER_TEMP/Sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle-tools"
+          GEN="$(find "$RUNNER_TEMP/sparkle-tools" -type f -name generate_appcast -print -quit)"
+          test -n "$GEN"
+          chmod +x "$GEN"
+
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$ARCHIVES/Zap-${VERSION}.zip"
+          cat > "$ARCHIVES/Zap-${VERSION}.html" << EOF
+          <h2>一闪 ${VERSION}</h2>
+          <p>启动器、剪贴板历史，以及带标注和置顶的区域截图。历史只留在本机。</p>
+          EOF
+
+          # 未签名的包不做增量包。Sparkle 仍校验整包的 EdDSA 签名。
+          "$GEN" \
+            --ed-key-file "$KEY_FILE" \
+            --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/" \
+            --link "https://github.com/${GITHUB_REPOSITORY}" \
+            --embed-release-notes \
+            --maximum-deltas 0 \
+            --maximum-versions 0 \
+            --disable-nested-code-check \
+            -o "$RUNNER_TEMP/appcast-new.xml" \
+            "$ARCHIVES"
+
+          PREV="$RUNNER_TEMP/appcast-previous.xml"
+          if ! curl -fsSL -o "$PREV" \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/appcast.xml"; then
+            rm -f "$PREV"
+          fi
+          python3 scripts/merge_appcast.py \
+            "$RUNNER_TEMP/appcast-new.xml" \
+            "$PREV" \
+            dist/appcast.xml
+          cp "$ARCHIVES/Zap-${VERSION}.zip" "dist/Zap-${VERSION}.zip"
+          test -s dist/appcast.xml
+          grep -q "sparkle:edSignature=" dist/appcast.xml
+          grep -q "Zap-${VERSION}.zip" dist/appcast.xml
+          cleanup
+
+      - name: 写发布说明
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          cat > release-notes.md << EOF
+          ## 一闪 ${VERSION}
+
+          下载 \`Zap-${VERSION}.zip\`，解压后把「Zap.app」放进「应用程序」文件夹。界面显示名是「一闪」。
+
+          这次构建默认没有 Apple 公证。第一次打开如果系统拦截：在访达里按住 Control 点按应用，选择「打开」。
+
+          装上带公钥的正式包之后，菜单栏或设置里的「检查更新…」会读取本页附件里的 \`appcast.xml\`。
+          EOF
+
+      - name: 发布到 GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: 一闪 ${{ steps.version.outputs.version }}
+          body_path: release-notes.md
+          files: |
+            dist/Zap-${{ steps.version.outputs.version }}.zip
+            dist/appcast.xml
+          make_latest: true

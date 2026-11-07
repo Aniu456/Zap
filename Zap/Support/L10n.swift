@@ -8,6 +8,9 @@ enum L10n {
     static let aboutMenu = "关于一闪"
     static let settings = "设置…"
     static let quit = "退出一闪"
+    static let checkForUpdates = "检查更新…"
+    static let updates = "更新"
+    static let updatesHelp = "向 GitHub Releases 查询新版本。这一步只下载更新说明和安装包，不上传剪贴板、截图或搜索记录。"
 
     static let openLauncher = "打开启动器"
     static let openClipboard = "剪贴板历史"

@@ -1,0 +1,81 @@
+一闪 Zap
+Copyright (c) 2026 Benny
+
+本仓库地址：https://github.com/Aniu456/Zap
+本仓库的应用源码按根目录 LICENSE 的 MIT 许可分发。
+
+这份 NOTICE 是来源说明。它列出一闪参考过的公开项目和地址，方便核对许可，避免法律和开源社区上的纠纷。仓库地址是上游主页。对照地址固定到一次提交，用来打开参考时的那一版。capcap 与 Buffer 使用讨论时指定的提交。其余 GitHub 项目没有指定提交，对照地址是 2026-11-07（新加坡时间）默认分支上的提交。
+
+除 Sparkle 外，下列项目的源文件没有进入本仓库。tinycast、macshot、Deck、OneClip 的代码不复制。同一份说明见 README 的「来源说明」。
+
+Raycast
+  产品网站：https://www.raycast.com
+  许可：专有软件
+  说明：产品范围参考，限于启动器和剪贴板。
+
+Snipaste
+  产品网站：https://www.snipaste.com
+  许可：专有软件
+  说明：截图体验参考，包括框选、可拖动的图标标注栏、贴在屏幕上。
+
+capcap
+  仓库地址：https://github.com/realskyrin/capcap
+  对照地址：https://github.com/realskyrin/capcap/tree/3696064b56330b23b40f4b9dfe19b693437ccb84
+  许可：MIT，Copyright (c) 2026 realskyrin
+  许可文本：https://github.com/realskyrin/capcap/blob/3696064b56330b23b40f4b9dfe19b693437ccb84/LICENSE
+  说明：参考这一版的截图和应用外壳。源码未进入本仓库。
+
+Maccy
+  仓库地址：https://github.com/p0deje/Maccy
+  对照地址：https://github.com/p0deje/Maccy/tree/f0b571e32e4031d7b91ba811f50d0f33e8e5548b
+  许可：MIT，Copyright (c) 2025 Alex Rodionov
+  许可文本：https://github.com/p0deje/Maccy/blob/f0b571e32e4031d7b91ba811f50d0f33e8e5548b/LICENSE
+  说明：参考剪贴板历史的行为。源码未进入本仓库。
+
+Buffer
+  仓库地址：https://github.com/samirpatil2000/Buffer
+  对照地址：https://github.com/samirpatil2000/Buffer/tree/a1e3a1762fe8308a252c8959e3eaafd94f7cc056
+  许可：MIT，Copyright (c) 2026 Samir Patil
+  许可文本：https://github.com/samirpatil2000/Buffer/blob/a1e3a1762fe8308a252c8959e3eaafd94f7cc056/LICENSE
+  说明：参考这一提交的剪贴板界面。源码未进入本仓库。
+
+tinycast
+  仓库地址：https://github.com/abue-ammar/tinycast
+  对照地址：https://github.com/abue-ammar/tinycast/tree/9df93751eb7fa9b56a1f0f8d0559ad4f063d272b
+  许可：AGPL-3.0，Copyright (C) 2026 Abue Ammar
+  许可文本：https://github.com/abue-ammar/tinycast/blob/9df93751eb7fa9b56a1f0f8d0559ad4f063d272b/LICENSE
+  说明：只参考启动器交互。代码未复制，源码未进入本仓库。
+
+Snapzy
+  仓库地址：https://github.com/duongductrong/Snapzy
+  对照地址：https://github.com/duongductrong/Snapzy/tree/77d3d3feb7f46d1909dce8824f3b35d5709378a2
+  许可：BSD-3-Clause，Copyright (c) 2026, Trong Duong Duc
+  许可文本：https://github.com/duongductrong/Snapzy/blob/77d3d3feb7f46d1909dce8824f3b35d5709378a2/LICENSE
+  说明：对照截图功能清单。源码未进入本仓库。若日后使用其代码，必须保留该 BSD-3-Clause 声明。
+
+macshot
+  仓库地址：https://github.com/sw33tLie/macshot
+  对照地址：https://github.com/sw33tLie/macshot/tree/ec1b4e9b4b94788cd07a5ba1ced4161d772c8c4c
+  许可：GPL-3.0
+  许可文本：https://github.com/sw33tLie/macshot/blob/ec1b4e9b4b94788cd07a5ba1ced4161d772c8c4c/LICENSE
+  说明：只登记地址。代码不复制，源码未进入本仓库。
+
+Deck
+  仓库地址：https://github.com/yuzeguitarist/Deck
+  对照地址：https://github.com/yuzeguitarist/Deck/tree/34d3e0d305d789dd85f5a0b73302b51779f6f3cd
+  许可：deckclip/ 为 AGPL-3.0-only；其余文件保留所有权利
+  说明：只登记地址。代码不复制，源码未进入本仓库。
+
+OneClip
+  仓库地址：https://github.com/One-Clip/OneClip
+  对照地址：https://github.com/One-Clip/OneClip/tree/65926e371b7f2b8001b45191265381ddf9066484
+  许可：仓库标为 MIT。作者说明早期源码开源，现行完整应用是商业软件。
+  说明：只登记地址。代码不复制，源码未进入本仓库。
+
+Sparkle 2.10.1
+  仓库地址：https://github.com/sparkle-project/Sparkle
+  对照地址：https://github.com/sparkle-project/Sparkle/tree/2.10.1
+  提交：ab7d71291238df6e0492143b120c9b696a35f603
+  许可：MIT。版权人见 ThirdParty/Sparkle/LICENSE
+  许可文本：https://github.com/sparkle-project/Sparkle/blob/2.10.1/LICENSE
+  说明：实际链接的依赖，用于检查更新。二进制框架由 Swift Package Manager 拉取。随一闪分发时保留 ThirdParty/Sparkle/LICENSE。

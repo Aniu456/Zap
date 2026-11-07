@@ -1,4 +1,5 @@
 import AppKit
+import Sparkle
 
 /// A nib-less AppKit app does not install an `@main` delegate on its own.
 /// `NSApplication.delegate` is weak, so this entry point retains the delegate.
@@ -21,6 +22,8 @@ enum ZapMain {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let updatePresenter = UpdatePresenter()
+    private var updaterController: SPUStandardUpdaterController?
     private var statusItem: StatusItemController?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -29,6 +32,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let updaterController = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: nil,
+            userDriverDelegate: updatePresenter
+        )
+        #if DEBUG
+        // Local Run builds have no EdDSA public key. Skip the daily feed check.
+        updaterController.updater.automaticallyChecksForUpdates = false
+        #endif
+        self.updaterController = updaterController
+
         FrontmostTracker.shared.start()
         AccessibilityPermission.shared.start()
         ScreenRecordingPermission.shared.start()
@@ -36,7 +50,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppIndex.shared.start()
         ClipboardStore.shared.load()
         ClipboardMonitor.shared.start()
-        statusItem = StatusItemController()
+        statusItem = StatusItemController(updater: updaterController)
+    }
+
+    func checkForUpdates(_ sender: Any?) {
+        updaterController?.checkForUpdates(sender)
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {

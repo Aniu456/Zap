@@ -1,10 +1,13 @@
 import AppKit
+import Sparkle
 
 @MainActor
 final class StatusItemController: NSObject, NSMenuDelegate {
     private let item: NSStatusItem
+    private let updater: SPUStandardUpdaterController
 
-    override init() {
+    init(updater: SPUStandardUpdaterController) {
+        self.updater = updater
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
         if let button = item.button {
@@ -48,6 +51,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let settings = NSMenuItem(title: L10n.settings, action: #selector(openSettings), keyEquivalent: "")
         settings.target = self
         menu.addItem(settings)
+
+        let updates = NSMenuItem(
+            title: L10n.checkForUpdates,
+            action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
+            keyEquivalent: ""
+        )
+        updates.target = updater
+        menu.addItem(updates)
         menu.addItem(.separator())
 
         let quit = NSMenuItem(title: L10n.quit, action: #selector(quit), keyEquivalent: "q")
