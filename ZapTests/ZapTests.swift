@@ -84,6 +84,65 @@ final class FuzzyMatcherTests: XCTestCase {
     }
 }
 
+final class LauncherSearchTests: XCTestCase {
+    func testPinyinFromChineseDisplayAndFileNames() {
+        let app = LaunchableApp(name: "网易有道词典", bundleName: "Dictionary",
+                                path: "/Applications/词典.app", bundleIdentifier: nil)
+        XCTAssertTrue(app.pinyinNames.contains("wangyiyoudaocidian"))
+        XCTAssertTrue(app.pinyinNames.contains("cidian"))
+        XCTAssertTrue(app.pinyinNames.contains { FuzzyMatcher.match(query: "youdao", candidate: $0) != nil })
+    }
+
+    @MainActor
+    func testPaletteFocusAndEditingOnFirstKeyAfterOpenAndReopen() async throws {
+        let palette = PaletteController.shared
+        let board = NSPasteboard.general
+        let savedItems = (board.pasteboardItems ?? []).map { item in
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) { copy.setData(data, forType: type) }
+            }
+            return copy
+        }
+        defer {
+            palette.hide()
+            board.clearContents()
+            board.writeObjects(savedItems)
+        }
+
+        for mode in [PaletteMode.launcher, .clipboard, .launcher] {
+            palette.show(mode)
+            // Allow the deferred makeKey and hosting-view attachment to finish.
+            for _ in 0..<50 {
+                if let panel = NSApp.keyWindow as? PalettePanel,
+                   panel.searchField?.currentEditor() != nil { break }
+                try await Task.sleep(nanoseconds: 10_000_000)
+            }
+            let panel = try XCTUnwrap(NSApp.keyWindow as? PalettePanel)
+            let editor = try XCTUnwrap(panel.searchField?.currentEditor() as? NSTextView)
+            XCTAssertTrue(panel.firstResponder === editor)
+            XCTAssertEqual(editor.string, "")
+            func command(_ letter: String, code: UInt16) throws {
+                let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
+                    modifierFlags: .command, timestamp: 0, windowNumber: panel.windowNumber,
+                    context: nil, characters: letter, charactersIgnoringModifiers: letter,
+                    isARepeat: false, keyCode: code))
+                NSApp.sendEvent(event)
+            }
+            board.clearContents()
+            board.setString("youdao", forType: .string)
+            try command("v", code: 9)
+            XCTAssertEqual(palette.query, "youdao")
+            try command("a", code: 0)
+            XCTAssertEqual(editor.selectedRange(), NSRange(location: 0, length: 6))
+            board.clearContents()
+            try command("c", code: 8)
+            XCTAssertEqual(board.string(forType: .string), "youdao")
+            palette.hide()
+        }
+    }
+}
+
 final class AppIndexStoreTests: XCTestCase {
     func testRoundTripKeepsNamesAndPaths() throws {
         let directory = FileManager.default.temporaryDirectory

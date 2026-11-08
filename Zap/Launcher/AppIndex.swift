@@ -9,6 +9,16 @@ struct LaunchableApp: Identifiable, Hashable, Codable, Sendable {
 
     var url: URL { URL(fileURLWithPath: path) }
 
+    var pinyinNames: [String] {
+        let names = Set([name, fileName, bundleName].compactMap { $0 })
+        return names.compactMap { name in
+            guard name.unicodeScalars.contains(where: { $0.properties.isIdeographic }),
+                  let latin = name.applyingTransform(.mandarinToLatin, reverse: false) else { return nil }
+            return latin.folding(options: .diacriticInsensitive, locale: nil)
+                .filter { !$0.isWhitespace }
+        }
+    }
+
     var fileName: String {
         url.deletingPathExtension().lastPathComponent
     }
@@ -24,7 +34,12 @@ struct RankedApp: Identifiable {
 final class AppIndex: ObservableObject {
     static let shared = AppIndex()
 
-    @Published private(set) var apps: [LaunchableApp] = []
+    @Published private(set) var apps: [LaunchableApp] = [] {
+        didSet {
+            pinyinByPath = Dictionary(uniqueKeysWithValues: apps.map { ($0.path, $0.pinyinNames) })
+        }
+    }
+    private var pinyinByPath: [String: [String]] = [:]
     @Published private(set) var isScanning = false
 
     private let icons = NSCache<NSString, NSImage>()
@@ -82,7 +97,11 @@ final class AppIndex: ObservableObject {
             let nameMatch = FuzzyMatcher.match(query: trimmed, candidate: app.name)
             let fileMatch = FuzzyMatcher.match(query: trimmed, candidate: app.fileName)
             let bundleMatch = app.bundleName.flatMap { FuzzyMatcher.match(query: trimmed, candidate: $0) }
-            guard let best = [nameMatch?.score, fileMatch?.score, bundleMatch?.score].compactMap({ $0 }).max() else {
+            let pinyinScore = pinyinByPath[app.path]?.compactMap {
+                FuzzyMatcher.match(query: trimmed, candidate: $0)?.score
+            }.max()
+            guard let best = [nameMatch?.score, fileMatch?.score, bundleMatch?.score, pinyinScore]
+                .compactMap({ $0 }).max() else {
                 continue
             }
             ranked.append(RankedApp(app: app, match: FuzzyMatch(score: best, indices: nameMatch?.indices ?? [])))

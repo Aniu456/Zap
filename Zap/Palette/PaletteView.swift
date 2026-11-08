@@ -7,7 +7,6 @@ struct PaletteView: View {
     @ObservedObject private var clipboard = ClipboardStore.shared
     @ObservedObject private var access = AccessibilityPermission.shared
     @ObservedObject private var settings = SettingsStore.shared
-    @FocusState private var fieldFocused: Bool
     @Environment(\.displayScale) private var displayScale
     @Environment(\.colorScheme) private var colorScheme
 
@@ -31,13 +30,7 @@ struct PaletteView: View {
             RoundedRectangle(cornerRadius: PaletteChrome.radius, style: .continuous)
                 .strokeBorder(colors.separator, lineWidth: 1)
         )
-        .onAppear { focusField() }
-        .onChange(of: palette.isPresented) { _, shown in
-            if shown { focusField() }
-        }
-        .onChange(of: palette.mode) { _, _ in
-            focusField()
-        }
+
     }
 
     private var searchRow: some View {
@@ -46,13 +39,8 @@ struct PaletteView: View {
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(colors.secondary)
                 .frame(width: 20)
-            TextField(placeholder, text: $palette.query)
-                .textFieldStyle(.plain)
-                .font(.system(size: 18))
-                .foregroundStyle(colors.primary)
-                .focused($fieldFocused)
-                .autocorrectionDisabled()
-                .id(palette.fieldToken)
+            PaletteSearchField(placeholder: placeholder, text: $palette.query, color: colors.primary)
+                .frame(maxWidth: .infinity)
             if !palette.query.isEmpty {
                 Button {
                     palette.query = ""
@@ -414,10 +402,51 @@ struct PaletteView: View {
             .fill(selected ? colors.selection : Color.clear)
     }
 
-    private func focusField() {
-        DispatchQueue.main.async {
-            fieldFocused = true
+}
+
+private struct PaletteSearchField: NSViewRepresentable {
+    let placeholder: String
+    @Binding var text: String
+    let color: Color
+
+    final class Field: NSTextField {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let panel = window as? PalettePanel else { return }
+            panel.searchField = self
+            if panel.isKeyWindow { panel.focusSearch() }
         }
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        let text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            text.wrappedValue = field.stringValue
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    func makeNSView(context: Context) -> Field {
+        let field = Field()
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = .systemFont(ofSize: 18)
+        field.usesSingleLineMode = true
+        field.lineBreakMode = .byClipping
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        field.delegate = context.coordinator
+        return field
+    }
+
+    func updateNSView(_ field: Field, context: Context) {
+        field.placeholderString = placeholder
+        field.textColor = NSColor(color)
+        if field.stringValue != text { field.stringValue = text }
     }
 }
 

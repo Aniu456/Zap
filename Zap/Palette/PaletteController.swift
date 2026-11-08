@@ -24,7 +24,7 @@ final class PaletteController: ObservableObject {
     @Published private(set) var selectedClipIDs: Set<UUID> = []
     @Published var selectedIndex = 0
     @Published private(set) var isPresented = false
-    /// Bumps every time the palette opens so the search field is recreated empty.
+    /// Scroll results back to the top on every presentation.
     @Published private(set) var fieldToken = 0
 
     private var panel: PalettePanel?
@@ -44,12 +44,12 @@ final class PaletteController: ObservableObject {
     func show(_ mode: PaletteMode) {
         selectedClipIDs.removeAll()
         self.mode = mode
-        // Do not keep the last search. The field editor can write it back, so the
-        // text field is also recreated via fieldToken.
+        let panel = ensurePanel()
+        panel.searchField?.abortEditing()
+        panel.searchField?.stringValue = ""
         query = ""
         selectedIndex = 0
         fieldToken &+= 1
-        let panel = ensurePanel()
         position(panel)
         isPresented = true
         NSApp.activate()
@@ -58,15 +58,10 @@ final class PaletteController: ObservableObject {
         installClickMonitor()
         AppIndex.shared.refreshIfStale()
         // makeKey on the same turn as installing the hosting view throws on newer AppKit.
-        // Clearing after makeKey drops a previous query the field editor writes back
-        // while resigning. The user cannot type until this returns.
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated {
-                guard PaletteController.shared.isPresented else { return }
-                PaletteController.shared.panel?.makeKey()
-                PaletteController.shared.query = ""
-                PaletteController.shared.selectedIndex = 0
-            }
+        DispatchQueue.main.async { [weak self] in
+            guard self?.isPresented == true else { return }
+            panel.makeKey()
+            panel.focusSearch()
         }
     }
 
@@ -268,7 +263,7 @@ final class PaletteController: ObservableObject {
             return false
         }
         let flags = NSEvent.ModifierFlags(rawValue: modifierRaw).intersection([.command, .option, .control, .shift])
-        if flags == .command && (code == UInt16(kVK_Delete) || code == UInt16(kVK_ForwardDelete)) {
+        if mode == .clipboard && flags == .command && (code == UInt16(kVK_Delete) || code == UInt16(kVK_ForwardDelete)) {
             deleteSelectedClipboardItem()
             return true
         }
@@ -341,6 +336,31 @@ final class ClearHostingView<Content: View>: NSHostingView<Content> {
 final class PalettePanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    weak var searchField: NSTextField?
+
+    func focusSearch() {
+        guard let searchField, searchField.window === self else { return }
+        if let editor = searchField.currentEditor(), firstResponder === editor { return }
+        makeFirstResponder(searchField)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard let editor = firstResponder as? NSTextView, editor.isEditable,
+              !editor.hasMarkedText() else { return super.performKeyEquivalent(with: event) }
+        let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        let key = event.charactersIgnoringModifiers?.lowercased()
+        switch (flags, key) {
+        case (.command, "a"): editor.selectAll(nil)
+        case (.command, "c"): editor.copy(nil)
+        case (.command, "x"): editor.cut(nil)
+        case (.command, "v"): editor.paste(nil)
+        case (.command, "z"): editor.undoManager?.undo()
+        case ([.command, .shift], "z"): editor.undoManager?.redo()
+        default: return super.performKeyEquivalent(with: event)
+        }
+        return true
+    }
 
     init() {
         super.init(
