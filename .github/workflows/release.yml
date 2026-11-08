@@ -48,7 +48,6 @@ jobs:
           set -euo pipefail
           if [ -z "${SPARKLE_PRIVATE_KEY}" ] || [ -z "${SPARKLE_PUBLIC_KEY}" ]; then
             echo "发布需要两个 Actions secret：SPARKLE_PRIVATE_KEY 和 SPARKLE_PUBLIC_KEY。"
-            echo "生成步骤在 README「发布第 1 版」。私钥不能提交到仓库。"
             exit 1
           fi
 
