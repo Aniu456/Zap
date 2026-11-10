@@ -7,6 +7,8 @@ struct PaletteView: View {
     @ObservedObject private var clipboard = ClipboardStore.shared
     @ObservedObject private var access = AccessibilityPermission.shared
     @ObservedObject private var settings = SettingsStore.shared
+    @State private var closingPreview: ClipboardItem?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.displayScale) private var displayScale
     @Environment(\.colorScheme) private var colorScheme
 
@@ -110,26 +112,28 @@ struct PaletteView: View {
                 )
             } else {
                 let preview = rows.first { $0.id == palette.previewID }?.item
-                GeometryReader { geometry in
-                    HStack(spacing: 0) {
-                        scrollList(count: rows.count) { index in
-                            let row = rows[index]
-                            clipboardRow(index: index, item: row.item, indices: row.match.indices,
-                                selected: palette.selectedClipIDs.isEmpty
-                                    ? (preview?.id ?? rows[safeIndex(rows.count)].id) == row.id
-                                    : palette.selectedClipIDs.contains(row.id))
-                        }
-                        .frame(width: geometry.size.width * (preview == nil ? 1 : 0.4))
-                        if let preview {
-                            ClipboardDetail(item: preview, store: clipboard, palette: palette)
-                                .id(preview.id)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .overlay(alignment: .leading) { Divider() }
-                                .clipped()
-                        }
+                ClipboardSplitView(progress: preview == nil ? 0 : 1) {
+                    scrollList(count: rows.count) { index in
+                        let row = rows[index]
+                        clipboardRow(index: index, item: row.item, indices: row.match.indices,
+                            selected: palette.selectedClipIDs.isEmpty
+                                ? (preview?.id ?? rows[safeIndex(rows.count)].id) == row.id
+                                : palette.selectedClipIDs.contains(row.id))
                     }
-                    .animation(.easeInOut(duration: 0.22), value: preview != nil)
+                } detail: {
+                    if let item = preview ?? closingPreview {
+                        ClipboardDetail(item: item, store: clipboard, palette: palette)
+                            .id(item.id)
+                            .overlay(alignment: .leading) { Divider() }
+                            .allowsHitTesting(preview != nil)
+                            .accessibilityHidden(preview == nil)
+                    }
                 }
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: preview != nil)
+                .onChange(of: preview?.id, initial: true) { _, _ in
+                    if let preview { closingPreview = preview }
+                }
+                .onDisappear { closingPreview = nil }
             }
         }
         .onChange(of: rows.map(\.id)) { _, ids in palette.updateVisibleClips(ids) }
@@ -423,6 +427,40 @@ struct PaletteView: View {
             .fill(selected ? colors.selection : Color.clear)
     }
 
+}
+
+/// Both panes follow one divider throughout the animation. The detail keeps its
+/// final layout while its visible width grows or shrinks from the right edge.
+struct ClipboardSplitView<ListContent: View, Detail: View>: View, Animatable {
+    var progress: CGFloat
+    @ViewBuilder var list: ListContent
+    @ViewBuilder var detail: Detail
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let fullDetailWidth = geometry.size.width * 0.6
+            let visibleWidth = fullDetailWidth * min(1, max(0, progress))
+            HStack(spacing: 0) {
+                list
+                    .frame(width: geometry.size.width - visibleWidth, height: geometry.size.height)
+                    .clipped()
+                    .contentShape(Rectangle())
+                if visibleWidth > 0 {
+                    detail
+                        .frame(width: fullDetailWidth, height: geometry.size.height, alignment: .topLeading)
+                        .frame(width: visibleWidth, alignment: .leading)
+                        .clipped()
+                        .contentShape(Rectangle())
+                }
+            }
+            .transaction { $0.animation = nil }
+        }
+    }
 }
 
 private struct PaletteSearchField: NSViewRepresentable {

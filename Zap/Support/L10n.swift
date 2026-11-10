@@ -40,6 +40,8 @@ enum L10n {
     static let selectAll = "全选"
     static let multiSelect = "多选"
     static let cancelSelection = "取消多选"
+    static let batchPasteFailed = "本次批量粘贴已中止，未能粘贴当前记录"
+    static let batchPasteUnread = "输入框未读取当前记录，已停止批量粘贴"
     static let pasteInOrder = "按顺序粘贴"
     static func selectedCount(_ count: Int) -> String { "已选 \(count) 条" }
     static func deleteSelection(_ count: Int) -> String { "删除所选（\(count)）" }

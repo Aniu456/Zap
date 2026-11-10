@@ -42,21 +42,20 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         return segments
     }
 
-    /// One ⌘V each. Text runs join with newlines; consecutive images go together as several
-    /// pasteboard items (file + PNG), the form chat apps and web inputs accept.
+    /// Automatic paste gives every image its own ⌘V, including for first-item-only readers.
     enum PasteStep: Equatable {
         case text(String)
         case images([ClipboardItem])
     }
 
-    static func pasteSteps(_ selection: [ClipboardItem]) -> [PasteStep] {
+    static func pasteSteps(_ selection: [ClipboardItem], groupAdjacentImages: Bool = false) -> [PasteStep] {
         var steps: [PasteStep] = []
         for segment in pasteSegments(selection) {
             switch segment {
             case .text(let text):
                 steps.append(.text(text))
             case .image(let item):
-                if case .images(let run)? = steps.last {
+                if groupAdjacentImages, case .images(let run)? = steps.last {
                     steps[steps.count - 1] = .images(run + [item])
                 } else {
                     steps.append(.images([item]))

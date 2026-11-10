@@ -123,10 +123,21 @@ final class ClipboardDetailTests: XCTestCase {
         let images = store.items.filter { $0.kind == .image }
         XCTAssertEqual(images.count, 2)
         let steps = ClipboardItem.pasteSteps([before, images[0], images[1], after])
-        XCTAssertEqual(steps, [.text("before"), .images(images), .text("after")])
+        XCTAssertEqual(steps, [.text("before"), .images([images[0]]), .images([images[1]]), .text("after")])
+        // Model an input that only imports the first attachment for each ⌘V.
+        var received: [Data] = []
+        for step in steps {
+            XCTAssertTrue(store.placeStepOnPasteboard(step))
+            let entries = try XCTUnwrap(board.pasteboardItems)
+            XCTAssertEqual(entries.count, 1)
+            if let image = entries.first?.data(forType: .png) { received.append(image) }
+        }
+        XCTAssertEqual(received, try images.map { try Data(contentsOf: XCTUnwrap(store.imageURL(for: $0))) })
 
+        let manual = ClipboardItem.pasteSteps([before, images[0], images[1], after], groupAdjacentImages: true)
+        XCTAssertEqual(manual, [.text("before"), .images(images), .text("after")])
         var reads = 0
-        XCTAssertTrue(store.placeStepOnPasteboard(steps[1]) { reads += 1 })
+        XCTAssertTrue(store.placeStepOnPasteboard(manual[1]) { reads += 1 })
         let pasted = try XCTUnwrap(board.pasteboardItems)
         XCTAssertEqual(pasted.count, 2)
         for item in pasted {

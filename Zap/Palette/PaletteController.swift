@@ -53,6 +53,7 @@ final class PaletteController: ObservableObject {
     /// Scroll results back to the top on every presentation.
     @Published private(set) var fieldToken = 0
 
+    private var pasteTask: Task<Void, Never>?
     private var panel: PalettePanel?
     private var keyMonitor: Any?
     private var clickMonitor: Any?
@@ -68,6 +69,7 @@ final class PaletteController: ObservableObject {
     }
 
     func show(_ mode: PaletteMode) {
+        pasteTask?.cancel()
         closePreview()
         self.mode = mode
         let panel = ensurePanel()
@@ -136,9 +138,7 @@ final class PaletteController: ObservableObject {
             AppIndex.shared.launch(app)
         case .clipboard:
             if !selectedClipIDs.isEmpty {
-                let steps = ClipboardItem.pasteSteps(orderedSelection)
-                guard !steps.isEmpty else { return }
-                pasteInOrder(steps)
+                pasteInOrder(orderedSelection)
             } else if let item = selectedClipboardItem() {
                 paste { ClipboardStore.shared.placeOnPasteboard(item) }
             }
@@ -234,10 +234,9 @@ final class PaletteController: ObservableObject {
         }
     }
 
-    /// Pastes steps in pick order. Each step goes out as soon as the target app has read the
-    /// previous one, with a short timeout in case an app never asks for the data.
-    private func pasteInOrder(_ steps: [ClipboardItem.PasteStep]) {
-        if steps.count == 1, case .text(let text) = steps[0] {
+    private func pasteInOrder(_ selection: [ClipboardItem]) {
+        guard !selection.isEmpty else { return }
+        if let text = ClipboardItem.joinedText(selection) {
             paste { ClipboardStore.shared.placeTextOnPasteboard(text) }
             return
         }
@@ -250,27 +249,45 @@ final class PaletteController: ObservableObject {
         let store = ClipboardStore.shared
         store.beginPasteBatch()
         guard AccessibilityPermission.shared.isTrusted, let pid = target?.processIdentifier else {
-            // No ⌘V without Accessibility access: leave the last step on the clipboard.
-            if let last = steps.last { store.placeStepOnPasteboard(last) }
+            // Manual paste keeps the last run (including all its consecutive image files).
+            if let last = ClipboardItem.pasteSteps(selection, groupAdjacentImages: true).last {
+                store.placeStepOnPasteboard(last)
+            }
             return
         }
-        func run(_ index: Int) {
-            guard index < steps.count else { return }
-            var advanced = false
-            let next = {
-                guard !advanced else { return }
-                advanced = true
-                run(index + 1)
+        let steps = ClipboardItem.pasteSteps(selection)
+        let board = NSPasteboard.general
+        pasteTask = Task {
+            let startingCount = board.changeCount
+            try? await Task.sleep(for: .milliseconds(120))
+            guard board.changeCount == startingCount else { return }
+            for step in steps {
+                guard !Task.isCancelled, NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
+                var read = false
+                guard store.placeStepOnPasteboard(step, onRead: { read = true }) else {
+                    ToastCenter.shared.show(L10n.batchPasteFailed)
+                    return
+                }
+                let count = board.changeCount
+                guard PasteService.simulateCommandV(pid: pid) else {
+                    ToastCenter.shared.show(L10n.batchPasteFailed)
+                    return
+                }
+                let clock = ContinuousClock()
+                let deadline = clock.now.advanced(by: .seconds(8))
+                while !read {
+                    guard !Task.isCancelled, board.changeCount == count else { return }
+                    guard clock.now < deadline else {
+                        ToastCenter.shared.show(L10n.batchPasteUnread)
+                        return
+                    }
+                    try? await Task.sleep(for: .milliseconds(25))
+                }
+                // Reading a representation can precede the input's asynchronous attachment import.
+                try? await Task.sleep(for: .milliseconds(300))
+                guard board.changeCount == count else { return }
             }
-            let wrote = store.placeStepOnPasteboard(steps[index]) {
-                // A brief beat after the read lets the app finish inserting before the clipboard changes.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { next() }
-            }
-            guard wrote else { return next() }
-            _ = PasteService.simulateCommandV(pid: pid)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { next() }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { run(0) }
     }
 
     private func currentCount() -> Int {
