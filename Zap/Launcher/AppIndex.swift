@@ -326,7 +326,7 @@ enum AppScanner {
         return resolved
     }
 
-    private static func makeApp(url resolved: URL) -> LaunchableApp? {
+    static func makeApp(url resolved: URL) -> LaunchableApp? {
         let fallback = resolved.deletingPathExtension().lastPathComponent
         let bundle = Bundle(url: resolved)
         let localized = bundle?.localizedInfoDictionary

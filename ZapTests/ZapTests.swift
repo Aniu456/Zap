@@ -359,3 +359,43 @@ final class ClipboardPersistenceTests: XCTestCase {
         XCTAssertTrue(store.flush())
     }
 }
+
+final class AppShortcutTests: XCTestCase {
+    @MainActor
+    func testMultipleBindingsRejectConflictsAndSurviveReload() throws {
+        let suite = "ZapTests.shortcuts." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SettingsStore(defaults: defaults)
+        let first = LaunchableApp(name: "One", bundleName: nil, path: "/test/One.app", bundleIdentifier: nil)
+        let second = LaunchableApp(name: "Two", bundleName: nil, path: "/test/Two.app", bundleIdentifier: nil)
+        defer {
+            store.removeApplication(first.id)
+            store.removeApplication(second.id)
+        }
+
+        store.addApplication(first)
+        store.addApplication(second)
+        store.addApplication(first)
+        let flags = NSEvent.ModifierFlags([.control, .command, .option, .shift]).rawValue
+        let firstChord = HotkeyChord(keyCode: 96, modifiers: flags)
+        let secondChord = HotkeyChord(keyCode: 97, modifiers: flags)
+        store.setApplicationHotkey(firstChord, for: first.id)
+        store.setApplicationHotkey(secondChord, for: second.id)
+        store.setApplicationHotkey(firstChord, for: second.id)
+        XCTAssertEqual(store.appWarnings[second.id], L10n.hotkeyConflict)
+        store.setApplicationHotkey(store.launcherHotkey, for: first.id)
+        XCTAssertEqual(store.appWarnings[first.id], L10n.hotkeyConflict)
+        store.setCaptureHotkey(secondChord)
+        XCTAssertEqual(store.captureWarning, L10n.hotkeyConflict)
+
+        let restored = SettingsStore(defaults: defaults)
+        XCTAssertEqual(restored.appShortcuts.map(\.chord), [firstChord, secondChord])
+        store.removeApplication(first.id)
+        store.setApplicationHotkey(firstChord, for: second.id)
+        XCTAssertNil(store.appWarnings[second.id])
+        let remaining = SettingsStore(defaults: defaults).appShortcuts
+        XCTAssertEqual(remaining.map(\.id), [second.id])
+        XCTAssertEqual(remaining.first?.chord, firstChord)
+    }
+}

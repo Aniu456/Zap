@@ -36,6 +36,11 @@ struct HotkeyChord: Codable, Equatable, Hashable, Sendable {
         Self.keyEquivalent(for: keyCode)
     }
 
+    static let commandSpace = HotkeyChord(
+        keyCode: UInt16(kVK_Space),
+        modifiers: NSEvent.ModifierFlags.command.rawValue
+    )
+
     static let launcherDefault = HotkeyChord(
         keyCode: UInt16(kVK_Space),
         modifiers: NSEvent.ModifierFlags.option.rawValue

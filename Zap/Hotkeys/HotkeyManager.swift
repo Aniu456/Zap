@@ -12,6 +12,8 @@ final class HotkeyManager {
     private let signature: OSType = 0x5A617031 // 'Zap1'
     private var handler: EventHandlerRef?
     private var hotKeys: [UInt32: EventHotKeyRef] = [:]
+    private var applications: [UInt32: LaunchableApp] = [:]
+    private var nextApplicationID: UInt32 = 4
     private var started = false
 
     private init() {}
@@ -21,6 +23,16 @@ final class HotkeyManager {
         started = true
         installHandler()
         registerAll()
+        MainActor.assumeIsolated {
+            SettingsStore.shared.resumeSpotlightTransfer()
+        }
+    }
+
+    func stop() {
+        unregisterAll()
+        MainActor.assumeIsolated {
+            SettingsStore.shared.returnSpotlightOnQuit()
+        }
     }
 
     /// Drops the current chords while the settings recorder is listening, then puts them back.
@@ -36,12 +48,24 @@ final class HotkeyManager {
         let chords = currentChords()
         let result = install(launcher: chords.launcher, clipboard: chords.clipboard, capture: chords.capture)
         MainActor.assumeIsolated {
+            for shortcut in SettingsStore.shared.appShortcuts {
+                guard let chord = shortcut.chord else { continue }
+                let ok = replaceApplicationHotkey(chord, for: shortcut)
+                SettingsStore.shared.noteApplicationRegistration(shortcut.id, ok: ok)
+            }
             SettingsStore.shared.noteRegistration(
                 launcherOK: result.launcher,
                 clipboardOK: result.clipboard,
                 captureOK: result.capture
             )
         }
+    }
+
+    func replaceLauncher(_ chord: HotkeyChord, previous: HotkeyChord) -> Bool {
+        unregister(Self.launcherID)
+        if register(chord, id: Self.launcherID) { return true }
+        register(previous, id: Self.launcherID)
+        return false
     }
 
     /// Registers all three chords. On failure the previously saved chords are put back
@@ -69,7 +93,9 @@ final class HotkeyManager {
         clipboard: HotkeyChord,
         capture: HotkeyChord
     ) -> (launcher: Bool, clipboard: Bool, capture: Bool) {
-        unregisterAll()
+        for id in [Self.launcherID, Self.clipboardID, CaptureFeature.hotkeyID] {
+            unregister(id)
+        }
         let launcherOK = register(launcher, id: Self.launcherID)
         let clipboardOK = register(clipboard, id: Self.clipboardID)
         let captureOK = register(capture, id: CaptureFeature.hotkeyID)
@@ -97,6 +123,7 @@ final class HotkeyManager {
                 )
                 if status != noErr { return status }
                 let manager = Unmanaged<HotkeyManager>.fromOpaque(userData).takeUnretainedValue()
+                guard hotKeyID.signature == manager.signature else { return OSStatus(eventNotHandledErr) }
                 manager.handle(id: hotKeyID.id)
                 return noErr
             },
@@ -132,7 +159,9 @@ final class HotkeyManager {
         case CaptureFeature.hotkeyID:
             CaptureController.shared.toggle()
         default:
-            break
+            if let app = shared.applications[id], !CaptureController.shared.isActive {
+                AppIndex.shared.launch(app)
+            }
         }
     }
 
@@ -154,10 +183,33 @@ final class HotkeyManager {
         return true
     }
 
+    func replaceApplicationHotkey(_ chord: HotkeyChord, for shortcut: AppShortcut) -> Bool {
+        let previous = applications.first { $0.value.id == shortcut.id }?.key
+        if let previous, shortcut.chord == chord, hotKeys[previous] != nil { return true }
+        let id = nextApplicationID
+        nextApplicationID += 1
+        guard register(chord, id: id) else { return false }
+        if let previous { unregister(previous) }
+        applications[id] = shortcut.app
+        return true
+    }
+
+    func unregisterApplication(_ appID: String) {
+        if let id = applications.first(where: { $0.value.id == appID })?.key {
+            unregister(id)
+        }
+    }
+
+    private func unregister(_ id: UInt32) {
+        if let ref = hotKeys.removeValue(forKey: id) { UnregisterEventHotKey(ref) }
+        applications[id] = nil
+    }
+
     private func unregisterAll() {
         for ref in hotKeys.values {
             UnregisterEventHotKey(ref)
         }
         hotKeys.removeAll()
+        applications.removeAll()
     }
 }

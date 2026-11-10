@@ -1,6 +1,7 @@
 import AppKit
 import Carbon
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @ObservedObject private var settings = SettingsStore.shared
@@ -57,6 +58,17 @@ struct SettingsView: View {
                     chord: settings.launcherHotkey,
                     warning: settings.launcherWarning
                 ) { settings.setLauncherHotkey($0) }
+                if let previous = settings.previousLauncher {
+                    Button("恢复原快捷键（\(previous.displayString)）") {
+                        HotkeyCapture.stopActive()
+                        settings.setLauncherHotkey(previous)
+                    }
+                } else {
+                    Button("用 ⌘ 空格打开 Zap（替代聚焦）") {
+                        HotkeyCapture.stopActive()
+                        settings.useCommandSpace()
+                    }
+                }
                 HotkeyRow(
                     title: L10n.clipboard,
                     chord: settings.clipboardHotkey,
@@ -78,6 +90,42 @@ struct SettingsView: View {
                 }
             } header: {
                 Text(L10n.hotkeys)
+            }
+
+            Section {
+                ForEach(settings.appShortcuts) { shortcut in
+                    HStack {
+                        Image(nsImage: AppIndex.shared.icon(for: shortcut.app))
+                            .resizable()
+                            .frame(width: 24, height: 24)
+                        HotkeyRow(title: shortcut.app.name, chord: shortcut.chord,
+                                  warning: settings.appWarnings[shortcut.id]) { chord in
+                            settings.setApplicationHotkey(chord, for: shortcut.id)
+                        }
+                        Button(role: .destructive) {
+                            settings.removeApplication(shortcut.id)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("移除" + shortcut.app.name + "的快捷键")
+                    }
+                    .help(shortcut.app.path)
+                }
+                Button("添加应用…") {
+                    let panel = NSOpenPanel()
+                    panel.allowedContentTypes = [.applicationBundle]
+                    panel.allowsMultipleSelection = true
+                    panel.directoryURL = URL(fileURLWithPath: "/Applications")
+                    guard panel.runModal() == .OK else { return }
+                    for url in panel.urls {
+                        if let app = AppScanner.makeApp(url: url.resolvingSymlinksInPath().standardizedFileURL) {
+                            settings.addApplication(app)
+                        }
+                    }
+                }
+            } header: {
+                Text("应用快捷键")
             }
 
             Section {
@@ -205,7 +253,7 @@ struct SettingsView: View {
 
 private struct HotkeyRow: View {
     let title: String
-    let chord: HotkeyChord
+    let chord: HotkeyChord?
     let warning: String?
     let onChange: (HotkeyChord) -> Void
 
@@ -214,7 +262,7 @@ private struct HotkeyRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             LabeledContent(title) {
-                Button(capture.recording ? L10n.recording : chord.displayString) {
+                Button(capture.recording ? L10n.recording : (chord?.displayString ?? "录制快捷键")) {
                     capture.onCapture = onChange
                     capture.toggle()
                 }
@@ -228,6 +276,9 @@ private struct HotkeyRow: View {
         }
         .onAppear { capture.onCapture = onChange }
         .onDisappear { capture.stop() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
+            if capture.recording { capture.stop() }
+        }
     }
 }
 
@@ -237,6 +288,8 @@ private final class HotkeyCapture: ObservableObject {
     var onCapture: ((HotkeyChord) -> Void)?
     private var monitor: Any?
     private static weak var active: HotkeyCapture?
+
+    static func stopActive() { active?.stop() }
 
     func toggle() {
         if recording {
@@ -288,8 +341,8 @@ private final class HotkeyCapture: ObservableObject {
             return true
         }
         let chord = HotkeyChord(keyCode: keyCode, modifiers: modifiers.rawValue)
-        onCapture?(chord)
         stop()
+        onCapture?(chord)
         return true
     }
 }

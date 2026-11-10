@@ -71,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        HotkeyManager.shared.stop()
         ClipboardStore.shared.flush()
         ClipboardStore.shared.discardPasteFiles()
     }
