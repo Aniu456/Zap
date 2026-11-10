@@ -141,7 +141,12 @@ final class ClipboardDetailTests: XCTestCase {
         let pasted = try XCTUnwrap(board.pasteboardItems)
         XCTAssertEqual(pasted.count, 2)
         for item in pasted {
-            XCTAssertNotNil(item.data(forType: .png))
+            let tiff = try XCTUnwrap(item.data(forType: .tiff))
+            let png = try XCTUnwrap(item.data(forType: .png))
+            let decodedTIFF = try XCTUnwrap(NSBitmapImageRep(data: tiff))
+            let decodedPNG = try XCTUnwrap(NSBitmapImageRep(data: png))
+            XCTAssertEqual(decodedTIFF.pixelsWide, decodedPNG.pixelsWide)
+            XCTAssertEqual(decodedTIFF.pixelsHigh, decodedPNG.pixelsHigh)
             let url = try XCTUnwrap(item.string(forType: .fileURL).flatMap(URL.init(string:)))
             XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
         }

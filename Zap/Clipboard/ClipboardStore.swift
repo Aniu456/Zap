@@ -325,7 +325,6 @@ final class ClipboardStore: ObservableObject {
             for item in items {
                 guard let png = pngData(for: item) else { continue }
                 var payload: [NSPasteboard.PasteboardType: Data] = [.png: png]
-                if let tiff = NSImage(data: png)?.tiffRepresentation { payload[.tiff] = tiff }
                 if let folder {
                     pasteImageCount += 1
                     let url = folder.appendingPathComponent("image-\(String(format: "%04d", pasteImageCount)).png")
@@ -345,7 +344,7 @@ final class ClipboardStore: ObservableObject {
         return writePasteboard(id: nil) { board in
             let items = providers.map { provider -> NSPasteboardItem in
                 let item = NSPasteboardItem()
-                item.setDataProvider(provider, forTypes: Array(provider.payload.keys))
+                item.setDataProvider(provider, forTypes: provider.types)
                 return item
             }
             return board.writeObjects(items)
@@ -367,6 +366,7 @@ final class ClipboardStore: ObservableObject {
     /// Pasted image files are only needed while their batch is on the clipboard. Called when the clipboard
     /// moves on (another paste from here, or a new copy anywhere), at launch, and at quit.
     func discardPasteFiles() {
+        pasteProviders.removeAll()
         try? FileManager.default.removeItem(at: Self.pasteRoot)
         pasteFolder = nil
         pasteImageCount = 0
@@ -580,7 +580,12 @@ final class ClipboardPersistence: @unchecked Sendable {
 
 /// Supplies one pasteboard item's data on demand and reports the first read.
 final class PasteDataProvider: NSObject, NSPasteboardItemDataProvider {
-    let payload: [NSPasteboard.PasteboardType: Data]
+    private let payload: [NSPasteboard.PasteboardType: Data]
+    var types: [NSPasteboard.PasteboardType] {
+        var types = Array(payload.keys)
+        if payload[.png] != nil { types.append(.tiff) }
+        return types
+    }
     private var onRead: (() -> Void)?
 
     init(payload: [NSPasteboard.PasteboardType: Data], onRead: @escaping () -> Void) {
@@ -589,7 +594,13 @@ final class PasteDataProvider: NSObject, NSPasteboardItemDataProvider {
     }
 
     func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem, provideDataForType type: NSPasteboard.PasteboardType) {
-        if let data = payload[type] { item.setData(data, forType: type) }
+        let data: Data?
+        if type == .tiff, let png = payload[.png] {
+            data = NSImage(data: png)?.tiffRepresentation
+        } else {
+            data = payload[type]
+        }
+        guard let data, item.setData(data, forType: type) else { return }
         if let onRead {
             self.onRead = nil
             DispatchQueue.main.async(execute: onRead)

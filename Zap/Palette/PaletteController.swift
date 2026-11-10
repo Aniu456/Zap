@@ -27,8 +27,9 @@ final class PaletteController: ObservableObject {
     private var selectionAnchorID: UUID?
 
     var orderedSelection: [ClipboardItem] {
-        let items = ClipboardStore.shared.items
-        return selectedClipIDs.compactMap { id in items.first { $0.id == id } }
+        guard !selectedClipIDs.isEmpty else { return [] }
+        let byID = Dictionary(ClipboardStore.shared.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return selectedClipIDs.compactMap { byID[$0] }
     }
 
     private func closePreview() {
@@ -226,11 +227,12 @@ final class PaletteController: ObservableObject {
             _ = write()
             return
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-            MainActor.assumeIsolated {
-                // Write immediately before Command-V so a newer clipboard value can't slip in between.
-                if write() { _ = PasteService.simulateCommandV(pid: pid) }
-            }
+        let startingCount = NSPasteboard.general.changeCount
+        pasteTask = Task {
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled, NSPasteboard.general.changeCount == startingCount,
+                  NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
+            if write() { _ = PasteService.simulateCommandV(pid: pid) }
         }
     }
 
