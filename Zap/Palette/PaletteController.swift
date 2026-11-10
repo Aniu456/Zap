@@ -16,12 +16,38 @@ final class PaletteController: ObservableObject {
     @Published var query: String = "" {
         didSet {
             guard query != oldValue else { return }
-            selectedClipIDs.removeAll()
+            closePreview()
             selectedIndex = 0
         }
     }
     let scrollRequests = PassthroughSubject<Int, Never>()
-    @Published private(set) var selectedClipIDs: Set<UUID> = []
+    @Published private(set) var selectedClipIDs: [UUID] = []
+    @Published private(set) var previewID: UUID?
+    @Published var editingClip = false
+    private var selectionAnchorID: UUID?
+
+    var orderedSelection: [ClipboardItem] {
+        let items = ClipboardStore.shared.items
+        return selectedClipIDs.compactMap { id in items.first { $0.id == id } }
+    }
+
+    private func closePreview() {
+        previewID = nil
+        editingClip = false
+        clearSelection()
+    }
+
+    private func clearSelection() {
+        selectedClipIDs.removeAll()
+    }
+
+    func selectAllClips() {
+        let ids = ClipboardStore.shared.ranked(matching: query).map(\.id)
+        guard !ids.isEmpty else { return }
+        editingClip = false
+        selectedClipIDs = ids
+        if previewID == nil || !ids.contains(previewID!) { previewID = ids.first }
+    }
     @Published var selectedIndex = 0
     @Published private(set) var isPresented = false
     /// Scroll results back to the top on every presentation.
@@ -42,7 +68,7 @@ final class PaletteController: ObservableObject {
     }
 
     func show(_ mode: PaletteMode) {
-        selectedClipIDs.removeAll()
+        closePreview()
         self.mode = mode
         let panel = ensurePanel()
         panel.searchField?.abortEditing()
@@ -75,6 +101,7 @@ final class PaletteController: ObservableObject {
     }
 
     func hide() {
+        closePreview()
         isPresented = false
         query = ""
         panel?.orderOut(nil)
@@ -92,13 +119,13 @@ final class PaletteController: ObservableObject {
     func moveSelection(_ delta: Int) {
         let count = currentCount()
         guard count > 0 else { return }
-        selectedClipIDs.removeAll()
+        clearSelection()
         selectedIndex = min(max(0, selectedIndex + delta), count - 1)
+        if previewID != nil { previewID = ClipboardStore.shared.ranked(matching: query)[selectedIndex].id }
         scrollRequests.send(selectedIndex)
     }
 
     func commitSelection() {
-        guard selectedClipIDs.isEmpty else { return }
         switch mode {
         case .launcher:
             let rows = AppIndex.shared.ranked(matching: query)
@@ -108,74 +135,142 @@ final class PaletteController: ObservableObject {
             hide()
             AppIndex.shared.launch(app)
         case .clipboard:
-            let rows = ClipboardStore.shared.ranked(matching: query)
-            guard !rows.isEmpty else { return }
-            let index = min(selectedIndex, rows.count - 1)
-            let item = rows[index].item
-            let target = FrontmostTracker.shared.targetApp()
-            hide()
-            paste(item, into: target)
+            if !selectedClipIDs.isEmpty {
+                let steps = ClipboardItem.pasteSteps(orderedSelection)
+                guard !steps.isEmpty else { return }
+                pasteInOrder(steps)
+            } else if let item = selectedClipboardItem() {
+                paste { ClipboardStore.shared.placeOnPasteboard(item) }
+            }
         }
     }
 
     func clickClipboardRow(_ item: ClipboardItem, index: Int, modifiers: NSEvent.ModifierFlags) {
         selectedIndex = index
+        editingClip = false
+        let ids = ClipboardStore.shared.ranked(matching: query).map(\.id)
         if modifiers.contains(.shift) {
-            selectedClipIDs = Set(ClipboardStore.shared.ranked(matching: query).map(\.id))
-        } else if modifiers.contains(.command) {
-            if !selectedClipIDs.insert(item.id).inserted {
-                selectedClipIDs.remove(item.id)
+            // ⇧ and ⌘⇧ both select the contiguous run from the anchor; ⌘⇧ keeps what was already picked.
+            let anchor = selectionAnchorID ?? previewID ?? item.id
+            let run = ClipSelection.range(in: ids, from: anchor, to: item.id)
+            selectedClipIDs = modifiers.contains(.command) ? ClipSelection.union(selectedClipIDs, run) : run
+            previewID = item.id
+            return
+        }
+        selectionAnchorID = item.id
+        if modifiers.contains(.command) || !selectedClipIDs.isEmpty {
+            // In multi-select a plain click toggles one row instead of dropping the whole selection.
+            if selectedClipIDs.isEmpty, let previewID, previewID != item.id {
+                selectedClipIDs.append(previewID)
             }
+            selectedClipIDs = ClipSelection.toggle(item.id, in: selectedClipIDs)
+            if selectedClipIDs.isEmpty {
+                previewID = nil
+            } else if !selectedClipIDs.contains(previewID ?? item.id) || selectedClipIDs.contains(item.id) {
+                previewID = selectedClipIDs.contains(item.id) ? item.id : selectedClipIDs.last
+            }
+            return
+        }
+        previewID = previewID == item.id ? nil : item.id
+    }
+
+    /// Esc leaves editing or multi-select first; otherwise it closes the panel (an open preview closes with it).
+    func escape() {
+        if editingClip {
+            editingClip = false
+        } else if !selectedClipIDs.isEmpty {
+            let keep = previewID
+            clearSelection()
+            previewID = keep
         } else {
-            selectedClipIDs.removeAll()
-            commitSelection()
+            dismiss()
         }
     }
 
     func deleteSelectedClipboardItem() {
         guard mode == .clipboard else { return }
         guard let item = selectedClipboardItem() else { return }
-        ClipboardStore.shared.delete(selectedClipIDs.isEmpty ? [item.id] : selectedClipIDs)
-        selectedClipIDs.removeAll()
+        ClipboardStore.shared.delete(selectedClipIDs.isEmpty ? [item.id] : Set(selectedClipIDs))
+        closePreview()
         selectedIndex = min(selectedIndex, max(0, currentCount() - 1))
     }
 
-    func togglePinSelected() {
-        guard mode == .clipboard else { return }
-        guard let item = selectedClipboardItem() else { return }
-        ClipboardStore.shared.togglePin(item.id)
+    func updateVisibleClips(_ ids: [UUID]) {
+        if let previewID, !ids.contains(previewID) {
+            editingClip = false
+            self.previewID = nil
+        }
+        let remaining = selectedClipIDs.filter(ids.contains)
+        if remaining != selectedClipIDs { selectedClipIDs = remaining }
+        if previewID == nil { previewID = remaining.last }
+        if let previewID, let index = ids.firstIndex(of: previewID) { selectedIndex = index }
     }
 
     private func selectedClipboardItem() -> ClipboardItem? {
+        if let previewID { return ClipboardStore.shared.items.first { $0.id == previewID } }
         let rows = ClipboardStore.shared.ranked(matching: query)
         guard !rows.isEmpty else { return nil }
         return rows[min(selectedIndex, rows.count - 1)].item
     }
 
-    private func paste(_ item: ClipboardItem, into target: NSRunningApplication?) {
+    /// Pastes into the previous app with a single ⌘V. Without Accessibility access the content
+    /// simply stays on the clipboard, silently.
+    private func paste(write: @escaping @MainActor () -> Bool) {
+        let target = FrontmostTracker.shared.targetApp()
+        hide()
         if let target {
             NSApp.yieldActivation(to: target)
             _ = target.activate(from: .current, options: [])
         }
-        let trusted = AccessibilityPermission.shared.isTrusted
-        let pid = target?.processIdentifier
-        let writeAndPaste = {
+        guard AccessibilityPermission.shared.isTrusted, let pid = target?.processIdentifier else {
+            _ = write()
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
             MainActor.assumeIsolated {
-                // Write immediately before Command-V. The activation delay must not
-                // leave a newer clipboard value for the target app to paste.
-                ClipboardStore.shared.placeOnPasteboard(item)
-                guard trusted, let pid else {
-                    ToastCenter.shared.show(L10n.pasteFallback)
-                    return
-                }
-                PasteService.simulateCommandV(pid: pid)
+                // Write immediately before Command-V so a newer clipboard value can't slip in between.
+                if write() { _ = PasteService.simulateCommandV(pid: pid) }
             }
         }
-        if target == nil || !trusted {
-            writeAndPaste()
-        } else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: writeAndPaste)
+    }
+
+    /// Pastes steps in pick order. Each step goes out as soon as the target app has read the
+    /// previous one, with a short timeout in case an app never asks for the data.
+    private func pasteInOrder(_ steps: [ClipboardItem.PasteStep]) {
+        if steps.count == 1, case .text(let text) = steps[0] {
+            paste { ClipboardStore.shared.placeTextOnPasteboard(text) }
+            return
         }
+        let target = FrontmostTracker.shared.targetApp()
+        hide()
+        if let target {
+            NSApp.yieldActivation(to: target)
+            _ = target.activate(from: .current, options: [])
+        }
+        let store = ClipboardStore.shared
+        store.beginPasteBatch()
+        guard AccessibilityPermission.shared.isTrusted, let pid = target?.processIdentifier else {
+            // No ⌘V without Accessibility access: leave the last step on the clipboard.
+            if let last = steps.last { store.placeStepOnPasteboard(last) }
+            return
+        }
+        func run(_ index: Int) {
+            guard index < steps.count else { return }
+            var advanced = false
+            let next = {
+                guard !advanced else { return }
+                advanced = true
+                run(index + 1)
+            }
+            let wrote = store.placeStepOnPasteboard(steps[index]) {
+                // A brief beat after the read lets the app finish inserting before the clipboard changes.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { next() }
+            }
+            guard wrote else { return next() }
+            _ = PasteService.simulateCommandV(pid: pid)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { next() }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { run(0) }
     }
 
     private func currentCount() -> Int {
@@ -263,6 +358,18 @@ final class PaletteController: ObservableObject {
             return false
         }
         let flags = NSEvent.ModifierFlags(rawValue: modifierRaw).intersection([.command, .option, .control, .shift])
+        if editingClip {
+            if flags.isEmpty && Int(code) == kVK_Escape {
+                editingClip = false
+                panel?.focusSearch()
+                return true
+            }
+            return false
+        }
+        if mode == .clipboard && flags == .command && Int(code) == kVK_ANSI_A && query.isEmpty {
+            selectAllClips()
+            return true
+        }
         if mode == .clipboard && flags == .command && (code == UInt16(kVK_Delete) || code == UInt16(kVK_ForwardDelete)) {
             deleteSelectedClipboardItem()
             return true
@@ -279,7 +386,7 @@ final class PaletteController: ObservableObject {
             commitSelection()
             return true
         case kVK_Escape:
-            dismiss()
+            if mode == .clipboard { escape() } else { dismiss() }
             return true
         default:
             return false
@@ -381,5 +488,24 @@ final class PalettePanel: NSPanel {
         titlebarAppearsTransparent = true
         isMovable = false
         becomesKeyOnlyIfNeeded = false
+    }
+}
+
+/// Pure selection helpers, kept outside the controller so they can be unit-tested.
+enum ClipSelection {
+    /// The contiguous run between `anchor` and `target` in list order. Falls back to the target alone.
+    static func range(in ids: [UUID], from anchor: UUID, to target: UUID) -> [UUID] {
+        guard let end = ids.firstIndex(of: target) else { return [] }
+        guard let start = ids.firstIndex(of: anchor) else { return [target] }
+        return Array(ids[min(start, end)...max(start, end)])
+    }
+
+    /// Adds `extra` after `base`, keeping the original pick order and dropping duplicates.
+    static func union(_ base: [UUID], _ extra: [UUID]) -> [UUID] {
+        base + extra.filter { !base.contains($0) }
+    }
+
+    static func toggle(_ id: UUID, in ids: [UUID]) -> [UUID] {
+        ids.contains(id) ? ids.filter { $0 != id } : ids + [id]
     }
 }

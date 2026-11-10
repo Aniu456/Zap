@@ -1,6 +1,8 @@
 import AppKit
 import CryptoKit
 import ImageIO
+import Vision
+import CoreImage
 
 struct RankedClip: Identifiable {
     var id: UUID { item.id }
@@ -16,6 +18,23 @@ final class ClipboardStore: ObservableObject {
         didSet { cachedRanking = nil }
     }
 
+    @Published private(set) var pasteboardItemID: UUID?
+    private var indexingImages = false
+    private var failedOCRFiles = Set<String>()
+    private let pasteboard: NSPasteboard
+    private var selectedChangeCount: Int?
+    private var sources: [String: (name: String, icon: NSImage)] = [:]
+
+    func sourceApp(_ bundleID: String) -> (name: String, icon: NSImage)? {
+        if let source = sources[bundleID] { return source }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else { return nil }
+        let source = (url.deletingPathExtension().lastPathComponent, NSWorkspace.shared.icon(forFile: url.path))
+        sources[bundleID] = source
+        return source
+    }
+
+    func clearPasteboardSelection() { pasteboardItemID = nil }
+
     private var cachedRanking: (query: String, rows: [RankedClip])?
     private let persistence = ClipboardPersistence()
 
@@ -23,8 +42,11 @@ final class ClipboardStore: ObservableObject {
     private var ignoredChangeCounts: Set<Int> = []
     private let thumbnails = NSCache<NSString, NSImage>()
     private(set) var isApplyingPasteboard = false
+    /// Kept alive while their items are on the pasteboard.
+    private var pasteProviders: [PasteDataProvider] = []
 
-    init(directory: URL? = nil) {
+    init(directory: URL? = nil, pasteboard: NSPasteboard = .general) {
+        self.pasteboard = pasteboard
         self.directory = directory
         thumbnails.countLimit = 200
         thumbnails.totalCostLimit = 8 * 1024 * 1024
@@ -49,6 +71,7 @@ final class ClipboardStore: ObservableObject {
     }
 
     func load() {
+        discardPasteFiles()
         do {
             let directory = try directory ?? Self.prepareDirectories()
             load(from: directory)
@@ -75,6 +98,7 @@ final class ClipboardStore: ObservableObject {
             removeOrphanedImages(in: directory, referencedBy: decoded)
             let update = ClipboardHistory.applyingLimits(decoded)
             items = update.items
+            indexImages()
             guard !update.removed.isEmpty else { return }
             deleteFiles(for: update.removed)
             save()
@@ -121,7 +145,7 @@ final class ClipboardStore: ObservableObject {
         persistence.flush()
     }
 
-    func recordText(_ text: String) {
+    func recordText(_ text: String, source: String? = nil) {
         guard ClipboardPolicy.acceptsText(text) else { return }
         let item = ClipboardItem(
             id: UUID(),
@@ -130,7 +154,7 @@ final class ClipboardStore: ObservableObject {
             imageFilename: nil,
             contentHash: Self.fingerprint(Data(text.utf8)),
             createdAt: Date(),
-            byteCount: text.utf8.count
+            byteCount: text.utf8.count, sourceBundleID: source
         )
         apply(item)
     }
@@ -139,7 +163,7 @@ final class ClipboardStore: ObservableObject {
     /// Returns false when the PNG is outside the history size limit; the pasteboard write still happens.
     @discardableResult
     func publishCapturedPNG(_ data: Data, caption: String) -> Bool {
-        let pasteboard = NSPasteboard.general
+        clearPasteboardSelection()
         isApplyingPasteboard = true
         pasteboard.clearContents()
         if let image = NSImage(data: data) {
@@ -149,12 +173,12 @@ final class ClipboardStore: ObservableObject {
         ignoredChangeCounts.insert(pasteboard.changeCount)
         isApplyingPasteboard = false
         guard ClipboardPolicy.acceptsImageByteCount(data.count) else { return false }
-        recordImageData(data, caption: caption)
+        recordImageData(data, caption: caption, source: Bundle.main.bundleIdentifier)
         return true
     }
 
     /// `data` must be PNG bytes.
-    func recordImageData(_ data: Data, caption: String?) {
+    func recordImageData(_ data: Data, caption: String?, source: String? = nil) {
         guard ClipboardPolicy.acceptsImageByteCount(data.count) else { return }
         let hash = Self.fingerprint(data)
         let storedCaption = caption.flatMap { ClipboardPolicy.acceptsText($0) ? $0 : nil }
@@ -166,7 +190,7 @@ final class ClipboardStore: ObservableObject {
                 imageFilename: nil,
                 contentHash: hash,
                 createdAt: Date(),
-                byteCount: data.count
+                byteCount: data.count, sourceBundleID: source
             )
             apply(placeholder)
             return
@@ -187,13 +211,14 @@ final class ClipboardStore: ObservableObject {
             imageFilename: filename,
             contentHash: hash,
             createdAt: Date(),
-            byteCount: data.count
+            byteCount: data.count, sourceBundleID: source
         )
         apply(item)
     }
 
     func removeAll() {
         let removed = items
+        clearPasteboardSelection()
         items = []
         deleteFiles(for: removed)
         save()
@@ -202,6 +227,7 @@ final class ClipboardStore: ObservableObject {
     func delete(_ ids: Set<UUID>) {
         let removed = items.filter { ids.contains($0.id) }
         guard !removed.isEmpty else { return }
+        if let pasteboardItemID, ids.contains(pasteboardItemID) { clearPasteboardSelection() }
         items.removeAll { ids.contains($0.id) }
         deleteFiles(for: removed)
         save()
@@ -232,7 +258,9 @@ final class ClipboardStore: ObservableObject {
             }
         }
         return items.compactMap { item in
-            guard let match = FuzzyMatcher.match(query: trimmed, candidate: item.searchableText) else { return nil }
+            let match = FuzzyMatcher.match(query: trimmed, candidate: item.searchableText)
+            let ocrHit = match == nil && item.matchesRecognizedText(trimmed)
+            guard let match = match ?? (ocrHit ? FuzzyMatch(score: 1, indices: []) : nil) else { return nil }
             return RankedClip(item: item, match: match)
         }
         .sorted { lhs, rhs in
@@ -247,7 +275,7 @@ final class ClipboardStore: ObservableObject {
     func thumbnail(for item: ClipboardItem, pointSize: CGFloat = 32, scale: CGFloat = 2) -> NSImage? {
         guard item.kind == .image, let name = item.imageFilename, let directory,
               pointSize.isFinite, scale.isFinite, pointSize > 0, scale > 0 else { return nil }
-        let pixels = Int(min(512, ceil(pointSize * scale)))
+        let pixels = Int(min(1280, ceil(pointSize * scale)))
         let key = "\(name):\(pixels)" as NSString
         if let cached = thumbnails.object(forKey: key) { return cached }
         let url = directory.appendingPathComponent("images", isDirectory: true).appendingPathComponent(name)
@@ -267,29 +295,174 @@ final class ClipboardStore: ObservableObject {
         return image
     }
 
-    func placeOnPasteboard(_ item: ClipboardItem) {
-        let pasteboard = NSPasteboard.general
-        isApplyingPasteboard = true
-        defer {
-            ignoredChangeCounts.insert(pasteboard.changeCount)
-            isApplyingPasteboard = false
-        }
-        pasteboard.clearContents()
+    @discardableResult
+    func placeOnPasteboard(_ item: ClipboardItem) -> Bool {
+        discardPasteFiles()
         switch item.kind {
         case .text:
-            if let text = item.text {
-                pasteboard.setString(text, forType: .string)
-            }
+            guard let text = item.text else { return false }
+            return writePasteboard(id: item.id) { $0.setString(text, forType: .string) }
         case .image:
-            if let data = pngData(for: item) {
-                if let image = NSImage(data: data) {
-                    pasteboard.writeObjects([image])
-                }
-                pasteboard.setData(data, forType: .png)
-            } else if pasteboard.types?.isEmpty ?? true, let text = item.text {
-                pasteboard.setString(text, forType: .string)
+            guard let data = pngData(for: item) else { return false }
+            return writePasteboard(id: item.id) { board in
+                if let image = NSImage(data: data) { board.writeObjects([image]) }
+                return board.setData(data, forType: .png)
             }
         }
+    }
+
+    /// Writes one paste step. Data is handed out lazily so `onRead` fires the moment the target app
+    /// actually reads it, which lets a multi-step paste move on without a fixed pause.
+    @discardableResult
+    func placeStepOnPasteboard(_ step: ClipboardItem.PasteStep, onRead: @escaping () -> Void = {}) -> Bool {
+        var payloads: [[NSPasteboard.PasteboardType: Data]] = []
+        switch step {
+        case .text(let text):
+            payloads = [[.string: Data(text.utf8)]]
+        case .images(let items):
+            if pasteFolder == nil { beginPasteBatch() }
+            let folder = pasteFolder
+            for item in items {
+                guard let png = pngData(for: item) else { continue }
+                var payload: [NSPasteboard.PasteboardType: Data] = [.png: png]
+                if let tiff = NSImage(data: png)?.tiffRepresentation { payload[.tiff] = tiff }
+                if let folder {
+                    pasteImageCount += 1
+                    let url = folder.appendingPathComponent("image-\(String(format: "%04d", pasteImageCount)).png")
+                    if (try? png.write(to: url)) != nil { payload[.fileURL] = Data(url.absoluteString.utf8) }
+                }
+                payloads.append(payload)
+            }
+        }
+        guard !payloads.isEmpty else { return false }
+        // Report once, after the target has read every item, so the next step never clears data still being pasted.
+        var unread = payloads.count
+        let providers = payloads.map { PasteDataProvider(payload: $0) {
+            unread -= 1
+            if unread == 0 { onRead() }
+        } }
+        pasteProviders = providers
+        return writePasteboard(id: nil) { board in
+            let items = providers.map { provider -> NSPasteboardItem in
+                let item = NSPasteboardItem()
+                item.setDataProvider(provider, forTypes: Array(provider.payload.keys))
+                return item
+            }
+            return board.writeObjects(items)
+        }
+    }
+
+    private var pasteFolder: URL?
+    private var pasteImageCount = 0
+
+    /// Starts one batch of pasted image files. Names keep counting across the batch's steps,
+    /// so inputs that dedupe attachments by file name never see the same name twice.
+    func beginPasteBatch() {
+        discardPasteFiles()
+        let folder = Self.pasteRoot.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        pasteFolder = (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil ? folder : nil
+        pasteImageCount = 0
+    }
+
+    /// Pasted image files are only needed while their batch is on the clipboard. Called when the clipboard
+    /// moves on (another paste from here, or a new copy anywhere), at launch, and at quit.
+    func discardPasteFiles() {
+        try? FileManager.default.removeItem(at: Self.pasteRoot)
+        pasteFolder = nil
+        pasteImageCount = 0
+    }
+
+    static var pasteRoot: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("ZapPaste", isDirectory: true)
+    }
+
+    func placeTextOnPasteboard(_ text: String) -> Bool {
+        discardPasteFiles()
+        return writePasteboard(id: nil) { $0.setString(text, forType: .string) }
+    }
+
+    private func writePasteboard(id: UUID?, write: (NSPasteboard) -> Bool) -> Bool {
+        let board = pasteboard
+        isApplyingPasteboard = true
+        defer { isApplyingPasteboard = false }
+        board.clearContents()
+        let wrote = write(board)
+        ignoredChangeCounts = [board.changeCount]
+        selectedChangeCount = board.changeCount
+        pasteboardItemID = wrote ? id : nil
+        return wrote
+    }
+
+    func imageURL(for item: ClipboardItem) -> URL? {
+        guard let name = item.imageFilename else { return nil }
+        return directory?.appendingPathComponent("images").appendingPathComponent(name)
+    }
+
+    // Index one image at a time. The file identity also guards edits or deletion during OCR.
+    private func indexImages() {
+        guard !indexingImages else { return }
+        indexingImages = true
+        Task {
+            defer { indexingImages = false }
+            while let item = items.first(where: {
+                guard let name = $0.imageFilename else { return false }
+                return $0.kind == .image && $0.recognizedText == nil && !failedOCRFiles.contains(name)
+            }),
+                  let url = imageURL(for: item) {
+                let words = await Task.detached(priority: .utility) { () -> String? in
+                    let request = VNRecognizeTextRequest()
+                    request.revision = VNRecognizeTextRequestRevision3
+                    request.recognitionLevel = .accurate
+                    request.recognitionLanguages = ["zh-Hans", "en-US"]
+                    do {
+                        try VNImageRequestHandler(url: url).perform([request])
+                        return String((request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
+                            .joined(separator: "\n").prefix(16_000))
+                    } catch { return nil }
+                }.value
+                guard let index = items.firstIndex(where: { $0.id == item.id && $0.imageFilename == item.imageFilename }) else { continue }
+                guard let words else { failedOCRFiles.insert(url.lastPathComponent); continue }
+                items[index].recognizedText = words
+                save()
+            }
+        }
+    }
+
+    func edit(_ original: ClipboardItem, text: String? = nil, quarterTurns: Int = 0) -> Bool {
+        guard var item = items.first(where: { $0.id == original.id && $0.contentHash == original.contentHash }) else { return false }
+        let data: Data
+        if item.kind == .text {
+            guard let text, ClipboardPolicy.acceptsText(text) else { return false }
+            data = Data(text.utf8)
+            item.text = text
+        } else {
+            guard quarterTurns % 4 != 0 else { return true }
+            guard let url = imageURL(for: item), let image = CIImage(contentsOf: url) else { return false }
+            let orientations: [CGImagePropertyOrientation] = [.up, .right, .down, .left]
+            let rotated = image.oriented(orientations[quarterTurns % 4])
+            guard let png = CIContext().pngRepresentation(of: rotated, format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB()),
+                  ClipboardPolicy.acceptsImageByteCount(png.count) else { return false }
+            data = png
+        }
+        item.contentHash = Self.fingerprint(data)
+        guard !items.contains(where: { $0.id != item.id && $0.kind == item.kind && $0.contentHash == item.contentHash }) else { return false }
+        if item.kind == .image {
+            item.imageFilename = UUID().uuidString + ".png"
+            item.recognizedText = nil
+            guard let url = imageURL(for: item) else { return false }
+            do { try data.write(to: url, options: .atomic) } catch { return false }
+            deleteFiles(for: [original])
+        }
+        item.byteCount = data.count
+        guard let index = items.firstIndex(where: { $0.id == item.id }) else { return false }
+        items[index] = item
+        let update = ClipboardHistory.applyingLimits(items)
+        items = update.items
+        deleteFiles(for: update.removed)
+        save()
+        if pasteboardItemID == item.id && selectedChangeCount == pasteboard.changeCount { placeOnPasteboard(item) }
+        indexImages()
+        return true
     }
 
     private func pngData(for item: ClipboardItem) -> Data? {
@@ -310,8 +483,11 @@ final class ClipboardStore: ObservableObject {
             diskBudget: ClipboardPolicy.maxDiskBytes
         )
         items = update.items
+        selectedChangeCount = pasteboard.changeCount
+        pasteboardItemID = items.first(where: { $0.contentHash == item.contentHash && $0.kind == item.kind })?.id
         deleteFiles(for: update.removed)
         save()
+        if item.kind == .image { indexImages() }
     }
 
     private func deleteFiles(for removed: [ClipboardItem]) {
@@ -399,5 +575,24 @@ final class ClipboardPersistence: @unchecked Sendable {
             }
         }
         return true
+    }
+}
+
+/// Supplies one pasteboard item's data on demand and reports the first read.
+final class PasteDataProvider: NSObject, NSPasteboardItemDataProvider {
+    let payload: [NSPasteboard.PasteboardType: Data]
+    private var onRead: (() -> Void)?
+
+    init(payload: [NSPasteboard.PasteboardType: Data], onRead: @escaping () -> Void) {
+        self.payload = payload
+        self.onRead = onRead
+    }
+
+    func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem, provideDataForType type: NSPasteboard.PasteboardType) {
+        if let data = payload[type] { item.setData(data, forType: type) }
+        if let onRead {
+            self.onRead = nil
+            DispatchQueue.main.async(execute: onRead)
+        }
     }
 }

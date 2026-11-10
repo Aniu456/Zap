@@ -30,17 +30,21 @@ final class ClipboardMonitor {
         lastChangeCount = count
         if ClipboardStore.shared.isApplyingPasteboard { return }
         if ClipboardStore.shared.consumeIgnored(count) { return }
+        ClipboardStore.shared.discardPasteFiles()
+        ClipboardStore.shared.clearPasteboardSelection()
         ingest(pasteboard)
     }
 
     private func ingest(_ pasteboard: NSPasteboard) {
         if shouldSkip(pasteboard) { return }
+        let source = pasteboard.string(forType: .init("org.nspasteboard.source"))
+            ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier
         let string = pasteboard.string(forType: .string)
         if let image = pngData(from: pasteboard) {
             let longText = (string?.count ?? 0) > 300
             let smallImage = image.count < 32_000
             if longText && smallImage {
-                if let string { ClipboardStore.shared.recordText(string) }
+                if let string { ClipboardStore.shared.recordText(string, source: source) }
                 return
             }
             let caption: String?
@@ -49,16 +53,16 @@ final class ClipboardMonitor {
             } else {
                 caption = nil
             }
-            ClipboardStore.shared.recordImageData(image, caption: caption)
+            ClipboardStore.shared.recordImageData(image, caption: caption, source: source)
             return
         }
         if let string, ClipboardPolicy.acceptsText(string) {
-            ClipboardStore.shared.recordText(string)
+            ClipboardStore.shared.recordText(string, source: source)
             return
         }
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty {
             let text = urls.map { $0.isFileURL ? $0.path : $0.absoluteString }.joined(separator: "\n")
-            ClipboardStore.shared.recordText(text)
+            ClipboardStore.shared.recordText(text, source: source)
         }
     }
 

@@ -1,4 +1,4 @@
-import CoreGraphics
+import AppKit
 import XCTest
 @testable import Zap
 
@@ -25,6 +25,35 @@ final class WindowSpacesTests: XCTestCase {
         XCTAssertFalse(behavior.contains(.moveToActiveSpace))
         XCTAssertFalse(behavior.contains(.fullScreenAuxiliary))
         XCTAssertFalse(behavior.contains(.stationary))
+    }
+}
+
+final class CaptureOverlayInputTests: XCTestCase {
+    @MainActor
+    func testFirstDragCreatesSelection() throws {
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil,
+            pixelsWide: 320, pixelsHigh: 180, bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let shot = ScreenGrabber.Shot(displayID: 1, frame: CGRect(x: 100, y: 100, width: 320, height: 180),
+                                      image: try XCTUnwrap(bitmap.cgImage))
+        let session = CaptureSession(shots: [shot]) { _ in }
+        session.begin()
+        defer { session.cancel() }
+        let view = try XCTUnwrap(NSApp.windows.compactMap { $0.contentView as? CaptureOverlayView }
+            .first { $0.session === session })
+        let window = try XCTUnwrap(view.window)
+        func event(_ type: NSEvent.EventType, _ point: CGPoint) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+        }
+        let down = try event(.leftMouseDown, CGPoint(x: 20, y: 30))
+        XCTAssertTrue(view.acceptsFirstMouse(for: down))
+        window.sendEvent(down)
+        let end = CGPoint(x: 140, y: 110)
+        window.sendEvent(try event(.leftMouseDragged, end))
+        window.sendEvent(try event(.leftMouseUp, end))
+        XCTAssertEqual(session.canvasState(for: 1)?.selection, CGRect(x: 20, y: 30, width: 120, height: 80))
+        XCTAssertFalse(session.usesCrosshair(on: 1))
     }
 }
 
@@ -334,7 +363,6 @@ final class CaptureCopyNoticeTests: XCTestCase {
         XCTAssertFalse(L10n.captureSaveFailed.isEmpty)
         XCTAssertFalse(L10n.captureSaved.isEmpty)
         XCTAssertFalse(L10n.screenRecordingNeeded.isEmpty)
-        XCTAssertFalse(L10n.pasteFallback.isEmpty)
     }
 }
 

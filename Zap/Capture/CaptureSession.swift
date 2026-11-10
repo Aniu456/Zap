@@ -79,6 +79,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
             key?.makeFirstResponder(view)
         }
         redraw()
+        if key != nil { NSCursor.crosshair.set() }
     }
 
     func cancel() {

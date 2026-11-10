@@ -96,7 +96,7 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                 HStack {
                     Button(L10n.grantAccess) {
-                        access.prompt()
+                        access.requestAccess()
                     }
                     .disabled(access.isTrusted)
                     Button(L10n.openSystemSettings) {

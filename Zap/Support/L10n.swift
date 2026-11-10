@@ -26,6 +26,8 @@ enum L10n {
     static let clipboardEmpty = "还没有复制内容"
     static let clipboardEmptyHint = "复制文本或图片后，会按时间出现在这里。"
     static let imageLabel = "图片"
+    static let imagePreview = "图片预览"
+    static let imagePreviewUnavailable = "无法预览这张图片"
     static let systemLocation = "系统"
     static let applicationsLocation = "应用程序"
 
@@ -36,6 +38,10 @@ enum L10n {
     static let pin = "置顶"
     static let unpin = "取消置顶"
     static let selectAll = "全选"
+    static let multiSelect = "多选"
+    static let cancelSelection = "取消多选"
+    static let pasteInOrder = "按顺序粘贴"
+    static func selectedCount(_ count: Int) -> String { "已选 \(count) 条" }
     static func deleteSelection(_ count: Int) -> String { "删除所选（\(count)）" }
     static let deleteItem = "删除这条"
 
@@ -88,7 +94,6 @@ enum L10n {
     static let clearConfirm = "清空"
     static let cancel = "取消"
 
-    static let pasteFallback = "已放回剪贴板，按 ⌘V 粘贴"
     static let launchFailed = "无法打开此应用"
     static let aboutIntro = "一闪住在菜单栏里，用快捷键唤起这三件事。"
     static let aboutLauncher = "启动器：搜索并打开本机应用，允许漏字和少量错字。"

@@ -51,6 +51,9 @@ final class CaptureOverlayView: NSView {
     override var isOpaque: Bool { true }
     override var acceptsFirstResponder: Bool { true }
 
+    // The initial press may also activate Zap or switch the key display.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func resetCursorRects() {
         discardCursorRects()
         let cursor: NSCursor = (session?.usesCrosshair(on: displayID) ?? true) ? .crosshair : .arrow

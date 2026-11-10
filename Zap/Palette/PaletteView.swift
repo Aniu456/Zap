@@ -109,19 +109,30 @@ struct PaletteView: View {
                     message: clipboard.items.isEmpty ? L10n.clipboardEmptyHint : nil
                 )
             } else {
-                scrollList(count: rows.count) { index in
-                    let row = rows[index]
-                    clipboardRow(
-                        index: index,
-                        item: row.item,
-                        indices: row.match.indices,
-                        selected: palette.selectedClipIDs.isEmpty
-                            ? safeIndex(rows.count) == index
-                            : palette.selectedClipIDs.contains(row.id)
-                    )
+                let preview = rows.first { $0.id == palette.previewID }?.item
+                GeometryReader { geometry in
+                    HStack(spacing: 0) {
+                        scrollList(count: rows.count) { index in
+                            let row = rows[index]
+                            clipboardRow(index: index, item: row.item, indices: row.match.indices,
+                                selected: palette.selectedClipIDs.isEmpty
+                                    ? (preview?.id ?? rows[safeIndex(rows.count)].id) == row.id
+                                    : palette.selectedClipIDs.contains(row.id))
+                        }
+                        .frame(width: geometry.size.width * (preview == nil ? 1 : 0.4))
+                        if let preview {
+                            ClipboardDetail(item: preview, store: clipboard, palette: palette)
+                                .id(preview.id)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .overlay(alignment: .leading) { Divider() }
+                                .clipped()
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.22), value: preview != nil)
                 }
             }
         }
+        .onChange(of: rows.map(\.id)) { _, ids in palette.updateVisibleClips(ids) }
     }
 
     private func scrollList<Row: View>(count: Int, @ViewBuilder row: @escaping (Int) -> Row) -> some View {
@@ -171,7 +182,8 @@ struct PaletteView: View {
     }
 
     private func clipboardRow(index: Int, item: ClipboardItem, indices: [Int], selected: Bool) -> some View {
-        HStack(spacing: 8) {
+        let source = item.sourceBundleID.flatMap(clipboard.sourceApp)
+        return HStack(spacing: 8) {
             Button {
                 palette.clickClipboardRow(item, index: index, modifiers: NSEvent.modifierFlags)
             } label: {
@@ -182,56 +194,56 @@ struct PaletteView: View {
                             .accessibilityHidden(true)
                     }
                     clipIcon(item)
-                    highlighted(item.displayText, indices: indices.filter { $0 < item.displayText.count })
+                        .overlay(alignment: .bottomTrailing) {
+                            if let source {
+                                Image(nsImage: source.icon)
+                                    .resizable().frame(width: 15, height: 15)
+                                    .background(colors.background, in: RoundedRectangle(cornerRadius: 3))
+                                    .help(source.name)
+                            }
+                        }
+                    VStack(alignment: .leading, spacing: 2) {
+                        highlighted(item.displayText, indices: indices.filter { $0 < item.displayText.count })
+                            .lineLimit(1)
+                            .foregroundStyle(colors.primary)
+                        HStack(spacing: 6) {
+                            if let name = source?.name ?? item.sourceBundleID { Text(verbatim: name) }
+                            Text(RelativeTime.string(from: item.createdAt))
+                            if ClipboardPolicy.showsStoredSize(of: item) {
+                                Text(DiskUsageFormat.bytes(item.byteCount))
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundStyle(colors.secondary)
                         .lineLimit(1)
-                        .foregroundStyle(colors.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     if item.pinnedAt != nil {
                         Image(systemName: "pin.fill")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(colors.accent)
                     }
-                    if ClipboardPolicy.showsStoredSize(of: item) {
-                        Text(DiskUsageFormat.bytes(item.byteCount))
-                            .font(.caption)
-                            .foregroundStyle(colors.secondary)
-                            .layoutPriority(1)
-                    }
-                    Text(RelativeTime.string(from: item.createdAt))
-                        .font(.caption)
-                        .foregroundStyle(colors.secondary)
-                        .layoutPriority(1)
                 }
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            if selected && palette.selectedClipIDs.isEmpty {
-                Button {
-                    palette.selectedIndex = index
-                    palette.togglePinSelected()
-                } label: {
-                    Image(systemName: item.pinnedAt == nil ? "pin" : "pin.slash")
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(.plain)
-                .help(item.pinnedAt == nil ? L10n.pin : L10n.unpin)
-                Button {
-                    palette.selectedIndex = index
-                    palette.deleteSelectedClipboardItem()
-                } label: {
-                    Image(systemName: "trash")
-                        .frame(width: 22, height: 22)
-                }
-                .buttonStyle(.plain)
-                .help(L10n.deleteItem)
+            Button {
+                clipboard.placeOnPasteboard(item)
+            } label: {
+                Image(systemName: clipboard.pasteboardItemID == item.id ? "checkmark" : "doc.on.clipboard")
+                    .contentTransition(.symbolEffect(.replace))
+                    .frame(width: 24, height: 24)
+                    .background(colors.keycap, in: Circle())
             }
+            .buttonStyle(.plain)
+            .help(clipboard.pasteboardItemID == item.id ? "已在剪贴板中" : "设为下次粘贴内容")
         }
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .background(rowFill(selected: selected))
         .onHover { inside in
-            if inside { palette.selectedIndex = index }
+            if inside && palette.previewID == nil { palette.selectedIndex = index }
         }
     }
 
@@ -306,7 +318,7 @@ struct PaletteView: View {
                 .foregroundStyle(colors.primary)
             Spacer(minLength: 8)
             Button(L10n.grantAccess) {
-                AccessibilityPermission.shared.prompt()
+                AccessibilityPermission.shared.requestAccess()
             }
             .controlSize(.small)
         }
@@ -316,13 +328,22 @@ struct PaletteView: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 14) {
-            keyHint("↑↓", L10n.choose)
-            keyHint("↩", palette.mode == .launcher ? L10n.open : L10n.paste)
-            keyHint("esc", L10n.close)
+        HStack(spacing: 12) {
+            if palette.mode == .clipboard && !palette.selectedClipIDs.isEmpty {
+                Text(L10n.selectedCount(palette.selectedClipIDs.count))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(colors.primary)
+                keyHint("↩", L10n.pasteInOrder)
+                keyHint("esc", L10n.cancelSelection)
+            } else {
+                keyHint("↑↓", L10n.choose)
+                keyHint("↩", palette.mode == .launcher ? L10n.open : L10n.paste)
+                keyHint("esc", L10n.close)
+            }
             if palette.mode == .clipboard {
                 if palette.selectedClipIDs.isEmpty {
-                    keyHint("⇧点击", L10n.selectAll)
+                    keyHint("⌘/⇧点击", L10n.multiSelect)
+                    keyHint("⌘A", L10n.selectAll)
                     keyHint("⌘⌫", L10n.deleteItem)
                 } else {
                     Button(role: .destructive) {

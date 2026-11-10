@@ -43,6 +43,21 @@ final class AccessibilityPermission: ObservableObject {
         refresh()
     }
 
+    /// The system's permission alert belongs to another process, so 一闪 can't raise it, and the palette
+    /// floats above it. Get out of the way, register 一闪 in the list, then bring System Settings to the
+    /// front, which stays on top even with Stage Manager.
+    func requestAccess() {
+        PaletteController.shared.hide()
+        DispatchQueue.main.async {
+            Task { @MainActor in
+                let permission = AccessibilityPermission.shared
+                permission.prompt()
+                guard !permission.isTrusted else { return }
+                permission.openSystemSettings()
+            }
+        }
+    }
+
     func openSystemSettings() {
         let raw = "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility"
         guard let url = URL(string: raw) else { return }
