@@ -151,9 +151,7 @@ struct PaletteView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
                 .background {
-                    if palette.mode == .clipboard {
-                        CompactScrollbar()
-                    }
+                    CompactScrollbar()
                 }
             }
             .onChange(of: palette.query) { _, _ in proxy.scrollTo(0, anchor: .top) }
@@ -504,14 +502,22 @@ private struct CompactScrollbar: NSViewRepresentable {
     final class Scroller: NSScroller {
         override class var isCompatibleWithOverlayScrollers: Bool { true }
 
+        override func draw(_ dirtyRect: NSRect) {
+            // Draw only the thumb: the native legacy slot adds a wide gutter.
+            drawKnob()
+        }
+
+        override func drawKnobSlot(in slotRect: NSRect, highlight flag: Bool) {}
+
         override func drawKnob() {
-            guard let context = NSGraphicsContext.current?.cgContext else { return }
-            context.saveGState()
-            // Narrow the visible thumb while keeping the native drag target.
-            context.translateBy(x: bounds.midX * 0.4, y: 0)
-            context.scaleBy(x: 0.6, y: 1)
-            super.drawKnob()
-            context.restoreGState()
+            guard knobProportion < 1 else { return }
+            let knob = rect(for: .knob)
+            guard knob.height > 0 else { return }
+            // Keep AppKit's full hit target and scrolling geometry.
+            let thumb = NSRect(x: knob.midX - 1.5, y: knob.minY,
+                               width: 3, height: knob.height)
+            NSColor.secondaryLabelColor.withAlphaComponent(0.45).setFill()
+            NSBezierPath(roundedRect: thumb, xRadius: 1.5, yRadius: 1.5).fill()
         }
     }
 
@@ -521,14 +527,25 @@ private struct CompactScrollbar: NSViewRepresentable {
             configureScroller()
         }
 
+        override func layout() {
+            super.layout()
+            // SwiftUI can attach or replace its scroller after the probe mounts.
+            configureScroller()
+        }
+
         func configureScroller() {
-            guard let scrollView = enclosingScrollView,
-                  let current = scrollView.verticalScroller else { return }
+            guard let scrollView = enclosingScrollView else { return }
+            if scrollView.scrollerStyle != .overlay {
+                scrollView.scrollerStyle = .overlay
+            }
+            guard let current = scrollView.verticalScroller else { return }
             guard !(current is Scroller) else { return }
             let scroller = Scroller(frame: current.frame)
             scroller.controlSize = .mini
-            scroller.scrollerStyle = current.scrollerStyle
+            scroller.scrollerStyle = .overlay
             scroller.knobStyle = current.knobStyle
+            scroller.doubleValue = current.doubleValue
+            scroller.knobProportion = current.knobProportion
             scroller.target = current.target
             scroller.action = current.action
             scrollView.verticalScroller = scroller
