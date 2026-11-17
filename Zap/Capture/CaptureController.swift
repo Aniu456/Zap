@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 
 @MainActor
 final class CaptureController {
@@ -9,11 +10,13 @@ final class CaptureController {
     private var generation = 0
     private var session: CaptureSession?
     private var pins: [PinWindowController] = []
+    private let logger = Logger(subsystem: "com.aniu456.Zap", category: "Capture")
 
     private init() {}
 
     func toggle() {
         if session != nil || isStarting {
+            logger.debug("Capture cancelled by a new hotkey press; starting=\(self.isStarting)")
             cancel()
             return
         }
@@ -56,6 +59,7 @@ final class CaptureController {
                 let shots = try await ScreenGrabber.captureAll()
                 guard token == self.generation else { return }
                 guard !shots.isEmpty else {
+                    self.logger.error("Capture startup returned no screen images")
                     self.isActive = false
                     ToastCenter.shared.show(L10n.captureFailed)
                     return
@@ -64,9 +68,11 @@ final class CaptureController {
                     self?.sessionEnded(outcome)
                 }
                 self.session = session
+                self.logger.debug("Presenting capture session")
                 session.begin()
             } catch {
                 guard token == self.generation else { return }
+                self.logger.error("Capture startup failed: \(error.localizedDescription, privacy: .public)")
                 self.isActive = false
                 ScreenRecordingPermission.shared.refresh()
                 if ScreenRecordingPermission.shared.isTrusted {

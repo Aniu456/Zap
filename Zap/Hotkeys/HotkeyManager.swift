@@ -1,6 +1,19 @@
 import Carbon
 import Foundation
 
+/// A held capture chord must not toggle the session off through key repeat.
+struct CaptureHotkeyPressState {
+    private(set) var isPressed = false
+
+    mutating func press() -> Bool {
+        guard !isPressed else { return false }
+        isPressed = true
+        return true
+    }
+
+    mutating func release() { isPressed = false }
+}
+
 /// Carbon hot keys swallow the chord, so Option-Space does not also type into the front app.
 ///
 final class HotkeyManager {
@@ -15,6 +28,7 @@ final class HotkeyManager {
     private var applications: [UInt32: LaunchableApp] = [:]
     private var nextApplicationID: UInt32 = 4
     private var started = false
+    private var capturePress = CaptureHotkeyPressState()
 
     private init() {}
 
@@ -103,10 +117,9 @@ final class HotkeyManager {
     }
 
     private func installHandler() {
-        var spec = EventTypeSpec(
-            eventClass: OSType(kEventClassKeyboard),
-            eventKind: UInt32(kEventHotKeyPressed)
-        )
+        var specs = [kEventHotKeyPressed, kEventHotKeyReleased].map {
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32($0))
+        }
         InstallEventHandler(
             GetApplicationEventTarget(),
             { _, event, userData -> OSStatus in
@@ -124,11 +137,20 @@ final class HotkeyManager {
                 if status != noErr { return status }
                 let manager = Unmanaged<HotkeyManager>.fromOpaque(userData).takeUnretainedValue()
                 guard hotKeyID.signature == manager.signature else { return OSStatus(eventNotHandledErr) }
+                if hotKeyID.id == CaptureFeature.hotkeyID {
+                    if GetEventKind(event) == UInt32(kEventHotKeyReleased) {
+                        manager.capturePress.release()
+                        return noErr
+                    }
+                    guard manager.capturePress.press() else { return noErr }
+                } else if GetEventKind(event) == UInt32(kEventHotKeyReleased) {
+                    return noErr
+                }
                 manager.handle(id: hotKeyID.id)
                 return noErr
             },
-            1,
-            &spec,
+            specs.count,
+            &specs,
             Unmanaged.passUnretained(self).toOpaque(),
             &handler
         )
@@ -201,11 +223,13 @@ final class HotkeyManager {
     }
 
     private func unregister(_ id: UInt32) {
+        if id == CaptureFeature.hotkeyID { capturePress.release() }
         if let ref = hotKeys.removeValue(forKey: id) { UnregisterEventHotKey(ref) }
         applications[id] = nil
     }
 
     private func unregisterAll() {
+        capturePress.release()
         for ref in hotKeys.values {
             UnregisterEventHotKey(ref)
         }

@@ -2,6 +2,26 @@ import AppKit
 import XCTest
 @testable import Zap
 
+final class CaptureHotkeyPressTests: XCTestCase {
+    func testHoldingChordDoesNotCancelStartingOrVisibleCapture() {
+        var state = CaptureHotkeyPressState()
+        XCTAssertTrue(state.press())
+        for _ in 0..<10 {
+            XCTAssertFalse(state.press())
+        }
+        state.release()
+        XCTAssertTrue(state.press(), "A separate press must still toggle capture")
+    }
+
+    func testResetDuringShortcutReregistrationAllowsNextPress() {
+        var state = CaptureHotkeyPressState()
+        XCTAssertTrue(state.press())
+        state.release()
+        state.release()
+        XCTAssertTrue(state.press())
+    }
+}
+
 final class WindowSpacesTests: XCTestCase {
     func testOverlayDoesNotUseTheMacOS26CrashCombination() {
         let behavior = WindowSpaces.overlay
