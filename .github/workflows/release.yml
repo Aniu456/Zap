@@ -50,6 +50,8 @@ jobs:
             echo "发布需要两个 Actions secret：SPARKLE_PRIVATE_KEY 和 SPARKLE_PUBLIC_KEY。"
             exit 1
           fi
+          # 公钥是已安装用户的信任锚，不能随发布意外更换。
+          test "$(plutil -extract SUPublicEDKey raw -o - Config/Sparkle-Info.plist)" = "$SPARKLE_PUBLIC_KEY"
 
       - name: 是否使用 Developer ID
         id: sign
@@ -121,7 +123,6 @@ jobs:
             local plist="$RUNNER_TEMP/Sparkle-Info-${slug}.plist"
             local derived="$RUNNER_TEMP/DerivedData-${slug}"
             cp Config/Sparkle-Info.plist "$plist"
-            /usr/libexec/PlistBuddy -c "Add :SUPublicEDKey string ${SPARKLE_PUBLIC_KEY}" "$plist"
             /usr/libexec/PlistBuddy -c "Set :SUFeedURL https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/${feed}" "$plist"
 
             xcodebuild \
@@ -287,6 +288,11 @@ jobs:
           PY
           cleanup
 
+      - name: 使用应用公钥验证最终更新包
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_update.py dist "${{ steps.version.outputs.version }}"
+
       - name: 写发布说明
         run: |
           set -euo pipefail
@@ -297,6 +303,8 @@ jobs:
           按这台 Mac 的芯片下载一份。M 系列（Apple 芯片）用 \`Zap-${VERSION}-apple-silicon.zip\`。Intel Mac 用 \`Zap-${VERSION}-intel.zip\`。
 
           解压后把「Zap.app」放进「应用程序」文件夹。界面显示名是「一闪」。
+
+          早期缺少更新公钥的安装包需要先退出应用，再手动替换一次。无需删除历史数据或偏好设置；后续可使用应用内更新。本发布包使用 Sparkle EdDSA 验证更新，不要求 Apple 开发者账号。
 
           这次构建默认没有 Apple 公证。第一次打开如果系统拦截：在访达里按住 Control 点按应用，选择「打开」。
 
