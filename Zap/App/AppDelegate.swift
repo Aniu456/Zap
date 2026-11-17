@@ -93,6 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let settings = NSMenuItem(title: L10n.settings, action: #selector(showSettings), keyEquivalent: ",")
         settings.target = self
+//        appMenu.addItem(settings)
         appMenu.addItem(settings)
 
         appMenu.addItem(.separator())

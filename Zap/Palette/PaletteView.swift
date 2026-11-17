@@ -111,7 +111,7 @@ struct PaletteView: View {
                     message: clipboard.items.isEmpty ? L10n.clipboardEmptyHint : nil
                 )
             } else {
-                let preview = rows.first { $0.id == palette.previewID }?.item
+                let preview: ClipboardItem? = rows.first { $0.id == palette.previewID }?.item ?? rows[safeIndex(rows.count)].item
                 ClipboardSplitView(progress: preview == nil ? 0 : 1) {
                     scrollList(count: rows.count) { index in
                         let row = rows[index]
@@ -232,16 +232,7 @@ struct PaletteView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            Button {
-                clipboard.placeOnPasteboard(item)
-            } label: {
-                Image(systemName: clipboard.pasteboardItemID == item.id ? "checkmark" : "doc.on.clipboard")
-                    .contentTransition(.symbolEffect(.replace))
-                    .frame(width: 24, height: 24)
-                    .background(colors.keycap, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .help(clipboard.pasteboardItemID == item.id ? "已在剪贴板中" : "设为下次粘贴内容")
+
         }
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -510,16 +501,43 @@ private struct PaletteSearchField: NSViewRepresentable {
 }
 
 private struct CompactScrollbar: NSViewRepresentable {
+    final class Scroller: NSScroller {
+        override class var isCompatibleWithOverlayScrollers: Bool { true }
+
+        override func drawKnob() {
+            guard let context = NSGraphicsContext.current?.cgContext else { return }
+            context.saveGState()
+            // Narrow the visible thumb while keeping the native drag target.
+            context.translateBy(x: bounds.midX * 0.4, y: 0)
+            context.scaleBy(x: 0.6, y: 1)
+            super.drawKnob()
+            context.restoreGState()
+        }
+    }
+
     final class Probe: NSView {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            enclosingScrollView?.verticalScroller?.controlSize = .mini
+            configureScroller()
+        }
+
+        func configureScroller() {
+            guard let scrollView = enclosingScrollView,
+                  let current = scrollView.verticalScroller else { return }
+            guard !(current is Scroller) else { return }
+            let scroller = Scroller(frame: current.frame)
+            scroller.controlSize = .mini
+            scroller.scrollerStyle = current.scrollerStyle
+            scroller.knobStyle = current.knobStyle
+            scroller.target = current.target
+            scroller.action = current.action
+            scrollView.verticalScroller = scroller
         }
     }
 
     func makeNSView(context: Context) -> Probe { Probe() }
 
     func updateNSView(_ view: Probe, context: Context) {
-        view.enclosingScrollView?.verticalScroller?.controlSize = .mini
+        view.configureScroller()
     }
 }

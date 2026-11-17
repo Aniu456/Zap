@@ -100,6 +100,8 @@ final class CaptureController {
                 ToastCenter.shared.show(message)
             }
             restorePreviousApp()
+        case .colorCopied:
+            restorePreviousApp()
         case .pinned(let image, let screenFrame):
             let pin = PinWindowController(image: image, screenFrame: screenFrame)
             pin.onClose = { [weak self, weak pin] in

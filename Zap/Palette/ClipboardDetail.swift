@@ -26,20 +26,10 @@ struct ClipboardDetail: View {
                     }
                     button(palette.editingClip ? "checkmark" : "pencil", palette.editingClip ? "保存编辑" : "编辑", action: toggleEditing)
                 }
-                if selection.isEmpty {
-                    // Same control as the row's trailing icon: both read and set store.pasteboardItemID.
-                    let current = store.pasteboardItemID == item.id
-                    Button { _ = store.placeOnPasteboard(item) } label: {
-                        Image(systemName: current ? "checkmark" : "doc.on.clipboard")
-                            .contentTransition(.symbolEffect(.replace))
-                            .frame(width: 24, height: 22)
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel(current ? "已在剪贴板中" : "设为下次粘贴内容")
-                    .disabled(palette.editingClip)
-                } else {
-                    button("doc.on.clipboard", L10n.pasteInOrder) { palette.commitSelection() }
+                button("clipboard", selection.isEmpty ? L10n.paste : L10n.pasteInOrder) {
+                    palette.commitSelection()
                 }
+                .disabled(palette.editingClip)
             }
             if failed { Text("无法保存，请检查内容是否为空、重复或超过容量限制。").font(.caption) }
             if !selection.isEmpty {

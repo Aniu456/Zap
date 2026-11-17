@@ -18,6 +18,7 @@ final class PaletteController: ObservableObject {
             guard query != oldValue else { return }
             closePreview()
             selectedIndex = 0
+            if mode == .clipboard { updateVisibleClips(ClipboardStore.shared.ranked(matching: query).map(\.id)) }
         }
     }
     let scrollRequests = PassthroughSubject<Int, Never>()
@@ -78,6 +79,7 @@ final class PaletteController: ObservableObject {
         panel.searchField?.stringValue = ""
         query = ""
         selectedIndex = 0
+        if mode == .clipboard { updateVisibleClips(ClipboardStore.shared.ranked(matching: query).map(\.id)) }
         fieldToken &+= 1
         position(panel)
         isPresented = true
@@ -172,7 +174,8 @@ final class PaletteController: ObservableObject {
             }
             return
         }
-        previewID = previewID == item.id ? nil : item.id
+        previewID = item.id
+        ClipboardStore.shared.placeOnPasteboard(item)
     }
 
     /// Esc leaves editing or multi-select first; otherwise it closes the panel (an open preview closes with it).
@@ -194,6 +197,7 @@ final class PaletteController: ObservableObject {
         ClipboardStore.shared.delete(selectedClipIDs.isEmpty ? [item.id] : Set(selectedClipIDs))
         closePreview()
         selectedIndex = min(selectedIndex, max(0, currentCount() - 1))
+        updateVisibleClips(ClipboardStore.shared.ranked(matching: query).map(\.id))
     }
 
     func updateVisibleClips(_ ids: [UUID]) {
@@ -203,7 +207,9 @@ final class PaletteController: ObservableObject {
         }
         let remaining = selectedClipIDs.filter(ids.contains)
         if remaining != selectedClipIDs { selectedClipIDs = remaining }
-        if previewID == nil { previewID = remaining.last }
+        if previewID == nil {
+            previewID = remaining.last ?? (ids.isEmpty ? nil : ids[min(selectedIndex, ids.count - 1)])
+        }
         if let previewID, let index = ids.firstIndex(of: previewID) { selectedIndex = index }
     }
 

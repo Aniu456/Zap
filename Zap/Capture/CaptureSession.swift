@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 final class CaptureSession: NSObject, NSTextFieldDelegate {
     enum Outcome {
         case copied(Data)
+        case colorCopied
         case pinned(NSImage, NSRect)
     }
 
@@ -210,7 +211,10 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
 
     func keyDown(_ event: NSEvent) {
         if textField != nil { return }
-        if loupe.copyColor(event) { return }
+        if loupe.copyColor(event) {
+            finish(.colorCopied)
+            return
+        }
         let modifiers = event.modifierFlags.intersection([.command, .option, .shift, .control])
         if event.keyCode == UInt16(kVK_Escape) {
             cancel()
