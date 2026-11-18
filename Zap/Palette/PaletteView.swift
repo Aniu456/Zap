@@ -179,12 +179,13 @@ struct PaletteView: View {
         .buttonStyle(.plain)
         .focusable(false)
         .onHover { inside in
-            if inside { palette.selectedIndex = index }
+            if inside { palette.selectHoveredRow(index) }
         }
     }
 
     private func clipboardRow(index: Int, item: ClipboardItem, indices: [Int], selected: Bool) -> some View {
         let source = item.sourceBundleID.flatMap(clipboard.sourceApp)
+        let title = item.displayText
         return HStack(spacing: 8) {
             Button {
                 palette.clickClipboardRow(item, index: index, modifiers: NSEvent.modifierFlags)
@@ -205,7 +206,7 @@ struct PaletteView: View {
                             }
                         }
                     VStack(alignment: .leading, spacing: 2) {
-                        highlighted(item.displayText, indices: indices.filter { $0 < item.displayText.count })
+                        highlighted(title, indices: indices.filter { $0 < title.count })
                             .lineLimit(1)
                             .foregroundStyle(colors.primary)
                         HStack(spacing: 6) {
@@ -236,31 +237,23 @@ struct PaletteView: View {
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .background(rowFill(selected: selected))
         .onHover { inside in
-            if inside && palette.previewID == nil { palette.selectedIndex = index }
+            if inside && palette.previewID == nil { palette.selectHoveredRow(index) }
         }
     }
 
     private func appIcon(_ app: LaunchableApp) -> some View {
-        Image(nsImage: apps.icon(for: app))
-            .resizable()
-            .frame(width: 28, height: 28)
+        PaletteLoadedIcon(id: app.path, symbol: "app", size: 28) {
+            await apps.loadIcon(for: app)
+        }
     }
 
     @ViewBuilder
     private func clipIcon(_ item: ClipboardItem) -> some View {
-        if item.kind == .image, let image = clipboard.thumbnail(for: item, scale: displayScale) {
-            Image(nsImage: image)
-                .resizable()
-                .interpolation(.high)
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 32, height: 32)
+        if item.kind == .image {
+            PaletteLoadedIcon(id: "\(item.imageFilename ?? item.id.uuidString):\(displayScale)", symbol: "photo", size: 32) {
+                await clipboard.loadThumbnail(for: item, scale: displayScale)
+            }
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        } else if item.kind == .image {
-            Image(systemName: "photo")
-                .font(.system(size: 16))
-                .foregroundStyle(colors.secondary)
-                .frame(width: 32, height: 32)
-                .background(colors.keycap, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
         } else {
             Image(systemName: "text.alignleft")
                 .font(.system(size: 14, weight: .medium))
@@ -495,6 +488,32 @@ private struct PaletteSearchField: NSViewRepresentable {
         field.placeholderString = placeholder
         field.textColor = NSColor(color)
         if field.stringValue != text { field.stringValue = text }
+    }
+}
+
+private struct PaletteLoadedIcon: View {
+    let id: String
+    let symbol: String
+    let size: CGFloat
+    let load: @MainActor () async -> NSImage?
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image).resizable().scaledToFill()
+            } else {
+                Image(systemName: symbol).foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipped()
+        .task(id: id) {
+            image = nil
+            let loaded = await load()
+            guard !Task.isCancelled else { return }
+            image = loaded
+        }
     }
 }
 

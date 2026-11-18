@@ -5,100 +5,48 @@ import OSLog
 final class CaptureController {
     static let shared = CaptureController()
 
-    private(set) var isActive = false
-    private var isStarting = false
-    private var generation = 0
-    private var session: CaptureSession?
+    var isActive: Bool { coordinator.isActive }
     private var pins: [PinWindowController] = []
     private let logger = Logger(subsystem: "com.aniu456.Zap", category: "Capture")
+    private enum StartupError: Error { case permissionDenied }
+
+    private lazy var coordinator = CaptureCoordinator(
+        prepare: {
+            PaletteController.shared.hide()
+            let permission = ScreenRecordingPermission.shared
+            permission.refresh()
+            if !permission.isTrusted {
+                permission.prompt()
+                permission.refresh()
+            }
+            guard permission.isTrusted else { throw StartupError.permissionDenied }
+        },
+        capture: { try await ScreenGrabber.captureAll() },
+        makePresentation: { shots, completion in
+            CaptureSession(shots: shots, onFinish: completion)
+        },
+        onOutcome: { [weak self] in self?.handle($0) },
+        onFailure: { [weak self] in self?.handleFailure($0) }
+    )
 
     private init() {}
 
-    func toggle() {
-        if session != nil || isStarting {
-            logger.debug("Capture cancelled by a new hotkey press; starting=\(self.isStarting)")
-            cancel()
-            return
-        }
-        start()
-    }
+    func toggle() { coordinator.toggle() }
+    func begin() { coordinator.begin() }
+    func cancel() { coordinator.cancel() }
 
-    /// Menu item always starts a shot. If one is already on screen, that one is cancelled first.
-    func begin() {
-        if session != nil || isStarting {
-            cancel()
-        }
-        start()
-    }
-
-    private func start() {
-        generation += 1
-        let token = generation
-        isStarting = true
-        isActive = true
-        PaletteController.shared.hide()
+    private func handleFailure(_ error: Error) {
+        logger.error("Capture failed: \(String(describing: error), privacy: .public)")
         ScreenRecordingPermission.shared.refresh()
-        if !ScreenRecordingPermission.shared.isTrusted {
-            ScreenRecordingPermission.shared.prompt()
-            ScreenRecordingPermission.shared.refresh()
-        }
-        guard ScreenRecordingPermission.shared.isTrusted else {
-            isStarting = false
-            isActive = false
+        if error is StartupError || !ScreenRecordingPermission.shared.isTrusted {
             ToastCenter.shared.show(L10n.screenRecordingNeeded)
             SettingsWindowController.shared.show()
-            return
-        }
-        Task { @MainActor in
-            defer {
-                if token == self.generation {
-                    self.isStarting = false
-                }
-            }
-            do {
-                let shots = try await ScreenGrabber.captureAll()
-                guard token == self.generation else { return }
-                guard !shots.isEmpty else {
-                    self.logger.error("Capture startup returned no screen images")
-                    self.isActive = false
-                    ToastCenter.shared.show(L10n.captureFailed)
-                    return
-                }
-                let session = CaptureSession(shots: shots) { [weak self] outcome in
-                    self?.sessionEnded(outcome)
-                }
-                self.session = session
-                self.logger.debug("Presenting capture session")
-                session.begin()
-            } catch {
-                guard token == self.generation else { return }
-                self.logger.error("Capture startup failed: \(error.localizedDescription, privacy: .public)")
-                self.isActive = false
-                ScreenRecordingPermission.shared.refresh()
-                if ScreenRecordingPermission.shared.isTrusted {
-                    ToastCenter.shared.show(L10n.captureFailed)
-                } else {
-                    ToastCenter.shared.show(L10n.screenRecordingNeeded)
-                    SettingsWindowController.shared.show()
-                }
-            }
+        } else {
+            ToastCenter.shared.show(L10n.captureFailed)
         }
     }
 
-    func cancel() {
-        generation += 1
-        isStarting = false
-        session?.cancel()
-        if session == nil {
-            isActive = false
-        }
-    }
-
-    private func sessionEnded(_ outcome: CaptureSession.Outcome?) {
-        session = nil
-        isActive = false
-        isStarting = false
-        guard let outcome else { return }
+    private func handle(_ outcome: CaptureSession.Outcome) {
         switch outcome {
         case .copied(let data):
             let stored = ClipboardStore.shared.publishCapturedPNG(data, caption: L10n.captureCaption)

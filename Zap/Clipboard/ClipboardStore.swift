@@ -295,6 +295,31 @@ final class ClipboardStore: ObservableObject {
         return image
     }
 
+    /// List rows decode on a worker; completing one icon only refreshes that row's icon.
+    func loadThumbnail(for item: ClipboardItem, scale: CGFloat) async -> NSImage? {
+        guard item.kind == .image, let name = item.imageFilename, let directory,
+              scale.isFinite, scale > 0 else { return nil }
+        let pixels = Int(min(1280, ceil(32 * scale)))
+        let key = "\(name):\(pixels)" as NSString
+        if let cached = thumbnails.object(forKey: key) { return cached }
+        let url = directory.appendingPathComponent("images").appendingPathComponent(name)
+        let bitmap = await Task.detached(priority: .userInitiated) { () -> CGImage? in
+            guard let source = CGImageSourceCreateWithURL(url as CFURL,
+                [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
+            return CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: pixels,
+                kCGImageSourceShouldCacheImmediately: true
+            ] as CFDictionary)
+        }.value
+        guard !Task.isCancelled, let bitmap else { return nil }
+        let image = NSImage(size: NSSize(width: bitmap.width, height: bitmap.height))
+        image.addRepresentation(NSBitmapImageRep(cgImage: bitmap))
+        thumbnails.setObject(image, forKey: key, cost: bitmap.bytesPerRow * bitmap.height)
+        return image
+    }
+
     @discardableResult
     func placeOnPasteboard(_ item: ClipboardItem) -> Bool {
         discardPasteFiles()

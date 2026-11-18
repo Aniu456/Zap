@@ -50,7 +50,7 @@ final class WindowSpacesTests: XCTestCase {
 
 final class CaptureOverlayInputTests: XCTestCase {
     @MainActor
-    func testFirstDragCreatesSelection() throws {
+    func testFirstDragCreatesSelection() async throws {
         let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil,
             pixelsWide: 320, pixelsHigh: 180, bitsPerSample: 8, samplesPerPixel: 4,
             hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
@@ -59,9 +59,14 @@ final class CaptureOverlayInputTests: XCTestCase {
         let session = CaptureSession(shots: [shot]) { _ in }
         session.begin()
         defer { session.cancel() }
+        let presented = expectation(description: "capture presentation event completed")
+        DispatchQueue.main.async { presented.fulfill() }
+        await fulfillment(of: [presented], timeout: 2)
         let view = try XCTUnwrap(NSApp.windows.compactMap { $0.contentView as? CaptureOverlayView }
             .first { $0.session === session })
         let window = try XCTUnwrap(view.window)
+        XCTAssertTrue(window.isVisible)
+        XCTAssertTrue(window.firstResponder === view)
         func event(_ type: NSEvent.EventType, _ point: CGPoint) throws -> NSEvent {
             try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: 0,
                 windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))

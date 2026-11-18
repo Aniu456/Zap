@@ -51,6 +51,14 @@ final class PaletteController: ObservableObject {
         if previewID == nil || !ids.contains(previewID!) { previewID = ids.first }
     }
     @Published var selectedIndex = 0
+    private var lastHoverLocation: NSPoint?
+
+    func selectHoveredRow(_ index: Int) {
+        let location = NSEvent.mouseLocation
+        defer { lastHoverLocation = location }
+        guard lastHoverLocation != location, selectedIndex != index else { return }
+        selectedIndex = index
+    }
     @Published private(set) var isPresented = false
     /// Scroll results back to the top on every presentation.
     @Published private(set) var fieldToken = 0
@@ -71,6 +79,7 @@ final class PaletteController: ObservableObject {
     }
 
     func show(_ mode: PaletteMode) {
+        lastHoverLocation = NSEvent.mouseLocation
         pasteTask?.cancel()
         closePreview()
         self.mode = mode

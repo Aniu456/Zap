@@ -333,7 +333,7 @@ final class ClipboardPersistenceTests: XCTestCase {
     }
 
     @MainActor
-    func testThumbnailUsesRequestedPixelSizeAndLeavesOriginalIntact() throws {
+    func testThumbnailUsesRequestedPixelSizeAndLeavesOriginalIntact() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory.appendingPathComponent("images"), withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -346,8 +346,13 @@ final class ClipboardPersistenceTests: XCTestCase {
         let store = ClipboardStore(directory: directory)
         store.recordImageData(data, caption: nil)
         let clip = try XCTUnwrap(store.items.first)
+        let loaded = await store.loadThumbnail(for: clip, scale: 2)
+        let asyncRetina = try XCTUnwrap(loaded)
+        XCTAssertEqual(asyncRetina.representations.first?.pixelsWide, 64)
+        XCTAssertEqual(asyncRetina.representations.first?.pixelsHigh, 32)
         let small = try XCTUnwrap(store.thumbnail(for: clip, scale: 1))
         let retina = try XCTUnwrap(store.thumbnail(for: clip, scale: 2))
+        XCTAssertTrue(asyncRetina === retina)
         XCTAssertEqual(small.representations.first?.pixelsWide, 32)
         XCTAssertEqual(retina.representations.first?.pixelsWide, 64)
         let preview = try XCTUnwrap(store.thumbnail(for: clip, pointSize: 608, scale: 1))

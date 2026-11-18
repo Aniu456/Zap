@@ -1,9 +1,11 @@
 import AppKit
 import Carbon
 import UniformTypeIdentifiers
+import OSLog
 
-/// Main-thread capture UI. Callers are already on the main actor.
-final class CaptureSession: NSObject, NSTextFieldDelegate {
+/// Selection and editing model; window ownership belongs to CaptureWindowGroup.
+@MainActor
+final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
     enum Outcome {
         case copied(Data)
         case colorCopied
@@ -13,8 +15,9 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
     let loupe = PixelLoupe()
     private let shots: [ScreenGrabber.Shot]
     private let onFinish: (Outcome?) -> Void
-    private var windows: [CGDirectDisplayID: CaptureWindow] = [:]
-    private var views: [CGDirectDisplayID: CaptureOverlayView] = [:]
+    private var windowGroup: CaptureWindowGroup?
+    private var windows: [CGDirectDisplayID: CaptureWindow] { windowGroup?.windows ?? [:] }
+    private var views: [CGDirectDisplayID: CaptureOverlayView] { windowGroup?.views ?? [:] }
     private var phase: Phase = .selecting
     private var activeDisplay: CGDirectDisplayID?
     private var dragStart: CGPoint?
@@ -28,8 +31,8 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
     private var tool: CaptureTool = .arrow
     private var textField: NSTextField?
     private var toolbar: CaptureToolbar?
-    private var globalMouseMonitor: Any?
     private var finished = false
+    private let logger = Logger(subsystem: "com.aniu456.Zap", category: "Capture")
     private var eraserSnapshotTaken = false
 
     private enum Phase {
@@ -43,47 +46,17 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
     }
 
     func begin() {
-        for shot in shots {
-            let window = CaptureWindow(
-                contentRect: shot.frame,
-                styleMask: [.borderless],
-                backing: .buffered,
-                defer: false
-            )
-            window.setFrame(shot.frame, display: false)
-            window.level = .screenSaver
-            WindowSpaces.apply(to: window)
-            window.isReleasedWhenClosed = false
-            window.isOpaque = true
-            window.backgroundColor = .black
-            window.hasShadow = false
-            window.hidesOnDeactivate = false
-            window.isMovable = false
-            window.acceptsMouseMovedEvents = true
-            let view = CaptureOverlayView(displayID: shot.displayID)
-            view.session = self
-            window.contentView = view
-            windows[shot.displayID] = window
-            views[shot.displayID] = view
-            window.orderFrontRegardless()
-        }
-        NSApp.activate()
-        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp, .leftMouseDragged]) { [weak self] event in
-            MainActor.assumeIsolated {
-                self?.routeGlobal(event)
-            }
-        }
-        let mouse = NSEvent.mouseLocation
-        let key = windows.values.first { $0.frame.contains(mouse) } ?? windows.values.first
-        key?.makeKeyAndOrderFront(nil)
-        if let view = key?.contentView {
-            key?.makeFirstResponder(view)
-        }
-        redraw()
-        if key != nil { NSCursor.crosshair.set() }
+        guard !finished, windowGroup == nil else { return }
+        let group = CaptureWindowGroup(shots: shots, session: self)
+        windowGroup = group
+        group.present { [weak self] event in self?.routeGlobal(event) }
     }
 
-    func cancel() {
+    func cancel() { cancel(reason: "controller") }
+
+    func cancel(reason: String) {
+        guard !finished else { return }
+        logger.notice("Capture cancellation source: \(reason, privacy: .public)")
         finish(nil)
     }
 
@@ -106,7 +79,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
     }
 
     func mouseDown(displayID: CGDirectDisplayID, point: CGPoint) {
-        guard textField == nil else { return }
+        guard !finished, textField == nil else { return }
         switch phase {
         case .selecting:
             activeDisplay = displayID
@@ -136,7 +109,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
     }
 
     func mouseDragged(displayID: CGDirectDisplayID, point: CGPoint) {
-        guard textField == nil, let dragStart, let local = pointInActiveView(from: displayID, point: point) else { return }
+        guard !finished, textField == nil, let dragStart, let local = pointInActiveView(from: displayID, point: point) else { return }
         switch phase {
         case .selecting:
             guard let activeDisplay else { return }
@@ -158,7 +131,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
     }
 
     func mouseUp(displayID: CGDirectDisplayID, point: CGPoint) {
-        guard textField == nil, let dragStart, let local = pointInActiveView(from: displayID, point: point) else { return }
+        guard !finished, textField == nil, let dragStart, let local = pointInActiveView(from: displayID, point: point) else { return }
         let start = dragStart
         self.dragStart = nil
         switch phase {
@@ -210,14 +183,14 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
     }
 
     func keyDown(_ event: NSEvent) {
-        if textField != nil { return }
+        if finished || textField != nil { return }
         if loupe.copyColor(event) {
             finish(.colorCopied)
             return
         }
         let modifiers = event.modifierFlags.intersection([.command, .option, .shift, .control])
         if event.keyCode == UInt16(kVK_Escape) {
-            cancel()
+            cancel(reason: "escape")
             return
         }
         guard phase == .editing else { return }
@@ -354,7 +327,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
         toolbar.onCopy = { [weak self] in self?.commit(pin: false) }
         toolbar.onPin = { [weak self] in self?.commit(pin: true) }
         toolbar.onSave = { [weak self] in self?.saveToFile() }
-        toolbar.onCancel = { [weak self] in self?.cancel() }
+        toolbar.onCancel = { [weak self] in self?.cancel(reason: "toolbar") }
         toolbar.setTool(tool)
         let size = toolbar.frame.size
         let bounds = view.bounds.width > 1 ? view.bounds : CGRect(origin: .zero, size: shot.frame.size)
@@ -673,27 +646,20 @@ final class CaptureSession: NSObject, NSTextFieldDelegate {
     private func finish(_ outcome: Outcome?) {
         guard !finished else { return }
         finished = true
-        loupe.hide()
-        if let globalMouseMonitor {
-            NSEvent.removeMonitor(globalMouseMonitor)
-            self.globalMouseMonitor = nil
+        let result: String
+        switch outcome {
+        case .copied: result = "copied"
+        case .colorCopied: result = "color copied"
+        case .pinned: result = "pinned"
+        case nil: result = "cancelled"
         }
+        logger.notice("Capture session ended: \(result, privacy: .public)")
+        loupe.hide()
         textField?.delegate = nil
         textField = nil
         toolbar = nil
-        let windows = Array(self.windows.values)
-        self.windows.removeAll()
-        views.removeAll()
-        for window in windows {
-            window.orderOut(nil)
-        }
-        // Drop the views on the next turn. The click or key that ended the shot
-        // may still be on the call stack.
-        DispatchQueue.main.async {
-            for window in windows {
-                window.contentView = nil
-            }
-        }
+        windowGroup?.close()
+        windowGroup = nil
         onFinish(outcome)
     }
 }

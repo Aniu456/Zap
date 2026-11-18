@@ -82,7 +82,9 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
     }
 
     var displayText: String {
-        String(searchableText.prefix(180))
+        let caption = Self.collapse(text ?? "", limit: 180)
+        if kind == .text { return caption }
+        return String((caption.isEmpty ? L10n.imageLabel : "\(L10n.imageLabel) \(caption)").prefix(180))
     }
 
     // OCR can misread one glyph even in otherwise legible screenshots.
@@ -106,9 +108,26 @@ struct ClipboardItem: Identifiable, Codable, Equatable, Sendable {
         }
     }
 
-    private static func collapse(_ text: String) -> String {
-        let parts = text.split { $0.isWhitespace }
-        return String(parts.joined(separator: " ").prefix(8_000))
+    private static func collapse(_ text: String, limit: Int = 8_000) -> String {
+        var result = ""
+        var count = 0
+        var pendingSpace = false
+        for character in text {
+            if character.isWhitespace {
+                pendingSpace = !result.isEmpty
+                continue
+            }
+            if pendingSpace {
+                result.append(" ")
+                count += 1
+                if count == limit { break }
+                pendingSpace = false
+            }
+            result.append(character)
+            count += 1
+            if count == limit { break }
+        }
+        return result
     }
 }
 

@@ -4,6 +4,17 @@ import XCTest
 
 @MainActor
 final class ClipboardDetailTests: XCTestCase {
+    func testBoundedDisplayTextPreservesWhitespaceAndUnicode() {
+        for text in ["  hello\n\tworld  ", String(repeating: "你好 👩🏽‍💻\n", count: 1000),
+                     String(repeating: "a", count: 179) + " \n b", " \t\n"] {
+            let item = ClipboardItem(id: UUID(), kind: .text, text: text,
+                contentHash: "test", createdAt: Date(), byteCount: text.utf8.count)
+            let collapsed = text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+            XCTAssertEqual(item.displayText, String(collapsed.prefix(180)))
+            XCTAssertEqual(item.searchableText, String(collapsed.prefix(8000)))
+        }
+    }
+
     func testOrderedPasteAndClipboardFeedback() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

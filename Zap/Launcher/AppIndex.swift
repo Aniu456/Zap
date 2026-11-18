@@ -87,6 +87,16 @@ final class AppIndex: ObservableObject {
         return image
     }
 
+    func loadIcon(for app: LaunchableApp) async -> NSImage {
+        let key = app.path as NSString
+        if let cached = icons.object(forKey: key) { return cached }
+        let image = await Task.detached(priority: .userInitiated) {
+            NSWorkspace.shared.icon(forFile: app.path)
+        }.value
+        icons.setObject(image, forKey: key)
+        return image
+    }
+
     private func rank(_ trimmed: String) -> [RankedApp] {
         if trimmed.isEmpty {
             return orderedForEmptyQuery().map { RankedApp(app: $0, match: FuzzyMatch(score: 0, indices: [])) }
