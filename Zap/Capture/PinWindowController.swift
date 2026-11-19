@@ -30,6 +30,7 @@ final class PinWindowController: NSObject {
         view.onClose = { [weak self] in self?.close() }
         window.acceptsMouseMovedEvents = true
         view.onScale = { [weak self] factor in self?.scale(by: factor) }
+        view.onResetScale = { [weak self] in self?.scale(to: 1) }
         window.contentView = view
         window.setFrame(screenFrame, display: true)
         window.orderFrontRegardless()
@@ -47,12 +48,14 @@ final class PinWindowController: NSObject {
     }
 
     private func scale(to next: CGFloat) {
+        guard next.isFinite else { return }
         let clamped = min(4, max(0.25, next))
         guard abs(clamped - scale) > 0.001 else { return }
         let center = CGPoint(x: window.frame.midX, y: window.frame.midY)
         let size = NSSize(width: baseSize.width * clamped, height: baseSize.height * clamped)
         let origin = NSPoint(x: center.x - size.width / 2, y: center.y - size.height / 2)
         scale = clamped
+        (window.contentView as? PinContentView)?.loupe.hide()
         window.setFrame(NSRect(origin: origin, size: size), display: true)
     }
 }
@@ -68,6 +71,7 @@ final class PinContentView: NSView {
     private var picking = false
     private lazy var bitmap = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
     var onScale: ((CGFloat) -> Void)?
+    var onResetScale: (() -> Void)?
 
     private let image: NSImage
     private let closeButton = NSButton()
@@ -88,7 +92,18 @@ final class PinContentView: NSView {
         closeButton.alphaValue = 0
         closeButton.frame = NSRect(x: 0, y: 0, width: 22, height: 22)
         addSubview(closeButton)
+        toolTip = "滚轮或双指捏合缩放 · 拖动移动 · 右键查看更多操作"
         menu = NSMenu()
+        for (title, action) in [
+            ("放大", #selector(zoomIn)),
+            ("缩小", #selector(zoomOut)),
+            ("恢复原始大小（100%）", #selector(resetZoom))
+        ] {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            menu?.addItem(item)
+        }
+        menu?.addItem(.separator())
         let picker = NSMenuItem(title: "取色器", action: #selector(togglePicker(_:)), keyEquivalent: "")
         picker.target = self
         menu?.addItem(picker)
@@ -103,6 +118,7 @@ final class PinContentView: NSView {
     }
 
     override var acceptsFirstResponder: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
@@ -150,6 +166,7 @@ final class PinContentView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeKey()
+        window?.makeFirstResponder(self)
         if event.clickCount == 2 {
             close()
             return
@@ -158,16 +175,36 @@ final class PinContentView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        // Do not keep resizing after a trackpad gesture has ended.
+        guard event.momentumPhase.isEmpty else { return }
         let delta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.scrollingDeltaY * 2
-        guard abs(delta) > 0.1 else { return }
-        let factor = delta > 0 ? 1.04 : 0.96
+        guard delta.isFinite, abs(delta) > 0.1 else { return }
+        let factor = exp(min(20, max(-20, delta)) * 0.015)
         onScale?(factor)
     }
+
+    override func magnify(with event: NSEvent) {
+        guard event.magnification.isFinite else { return }
+        onScale?(max(0.01, 1 + event.magnification))
+    }
+
+    @objc private func zoomIn() { onScale?(1.2) }
+    @objc private func zoomOut() { onScale?(1 / 1.2) }
+    @objc private func resetZoom() { onResetScale?() }
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 {
             close()
             return
+        }
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        if modifiers.isEmpty || modifiers == .command || modifiers == .shift || modifiers == [.command, .shift] {
+            switch event.charactersIgnoringModifiers {
+            case "+", "=": zoomIn(); return
+            case "-": zoomOut(); return
+            case "0": resetZoom(); return
+            default: break
+            }
         }
         if picking && loupe.copyColor(event) { return }
         super.keyDown(with: event)

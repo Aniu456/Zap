@@ -8,7 +8,7 @@ final class CaptureWindow: NSWindow {
 struct CaptureCanvasState {
     var background: CGImage
     var selection: CGRect?
-    /// Mosaic-only composite of the crop. The selection hole itself always shows `background`.
+    /// Mosaic-only composite of 文件夹是不是有点问题啊？应该是，它文件夹分类应该和我大的是同样的。the crop. The selection hole itself always shows `background`.
     var preview: CGImage?
     var marks: [CaptureMark]
     var draft: CaptureMark?
