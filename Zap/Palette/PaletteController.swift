@@ -282,12 +282,10 @@ final class PaletteController: ObservableObject {
                 guard !Task.isCancelled, NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return }
                 var read = false
                 guard store.placeStepOnPasteboard(step, onRead: { read = true }) else {
-                    ToastCenter.shared.show(L10n.batchPasteFailed)
                     return
                 }
                 let count = board.changeCount
                 guard PasteService.simulateCommandV(pid: pid) else {
-                    ToastCenter.shared.show(L10n.batchPasteFailed)
                     return
                 }
                 let clock = ContinuousClock()
@@ -295,7 +293,6 @@ final class PaletteController: ObservableObject {
                 while !read {
                     guard !Task.isCancelled, board.changeCount == count else { return }
                     guard clock.now < deadline else {
-                        ToastCenter.shared.show(L10n.batchPasteUnread)
                         return
                     }
                     try? await Task.sleep(for: .milliseconds(25))

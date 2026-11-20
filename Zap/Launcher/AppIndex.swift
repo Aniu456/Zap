@@ -130,11 +130,7 @@ final class AppIndex: ObservableObject {
         NSWorkspace.shared.openApplication(at: app.url, configuration: configuration) { _, error in
             let failed = error != nil
             Task { @MainActor in
-                if failed {
-                    ToastCenter.shared.show(L10n.launchFailed)
-                } else {
-                    AppIndex.shared.remember(launched)
-                }
+                if !failed { AppIndex.shared.remember(launched) }
             }
         }
     }

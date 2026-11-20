@@ -39,26 +39,19 @@ final class CaptureController {
         logger.error("Capture failed: \(String(describing: error), privacy: .public)")
         ScreenRecordingPermission.shared.refresh()
         if error is StartupError || !ScreenRecordingPermission.shared.isTrusted {
-            ToastCenter.shared.show(L10n.screenRecordingNeeded)
             SettingsWindowController.shared.show()
-        } else {
-            ToastCenter.shared.show(L10n.captureFailed)
         }
     }
 
     private func handle(_ outcome: CaptureSession.Outcome) {
         switch outcome {
         case .copied(let data):
-            let stored = ClipboardStore.shared.publishCapturedPNG(data, caption: L10n.captureCaption)
-            if let message = CaptureCopyNotice.message(storedInHistory: stored) {
-                ToastCenter.shared.show(message)
-            }
+            _ = ClipboardStore.shared.publishCapturedPNG(data, caption: L10n.captureCaption)
             restorePreviousApp()
         case .colorCopied:
             restorePreviousApp()
         case .saved:
             restorePreviousApp()
-            ToastCenter.shared.show(L10n.captureSaved)
         case .pinned(let image, let screenFrame):
             let pin = PinWindowController(image: image, screenFrame: screenFrame)
             pin.onClose = { [weak self, weak pin] in

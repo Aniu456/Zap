@@ -40,8 +40,6 @@ enum L10n {
     static let selectAll = "全选"
     static let multiSelect = "多选"
     static let cancelSelection = "取消多选"
-    static let batchPasteFailed = "本次批量粘贴已中止，未能粘贴当前记录"
-    static let batchPasteUnread = "输入框未读取当前记录，已停止批量粘贴"
     static let pasteInOrder = "按顺序粘贴"
     static func selectedCount(_ count: Int) -> String { "已选 \(count) 条" }
     static func deleteSelection(_ count: Int) -> String { "删除所选（\(count)）" }
@@ -55,7 +53,6 @@ enum L10n {
     static let screenRecordingBody = "区域截图需要「屏幕录制」权限。系统会把一闪加进列表，你再打开开关。截到的是按下快捷键那一刻的画面。"
     static let screenRecordingPath = "系统设置 → 隐私与安全性 → 屏幕录制 → 打开「一闪」或 Zap"
     static let screenRecordingRestart = "如果刚刚打开了权限却仍截不到画面，退出并重新打开一闪。"
-    static let screenRecordingNeeded = "需要屏幕录制权限才能截图"
     static let accessibilityTitle = "辅助功能"
     static let accessibilityBody = "把历史直接粘贴到当前应用，需要「辅助功能」权限。未授权时，选中一条记录仍会放回系统剪贴板，再用 ⌘V 粘贴即可。启动器不依赖这项权限。"
     static let accessibilityBanner = "还没有辅助功能权限。选中后请按 ⌘V 粘贴。"
@@ -96,7 +93,6 @@ enum L10n {
     static let clearConfirm = "清空"
     static let cancel = "取消"
 
-    static let launchFailed = "无法打开此应用"
     static let aboutIntro = "一闪住在菜单栏里，用快捷键唤起这三件事。"
     static let aboutLauncher = "启动器：搜索并打开本机应用，允许漏字和少量错字。"
     static let aboutClipboard = "剪贴板历史：浏览、搜索复制过的文本和图片，并粘贴到当前最前面的应用。"
@@ -122,9 +118,4 @@ enum L10n {
     static let captureSelectHint = "拖拽选择区域，Esc 取消"
     static let captureEditHint = "⌘Z 撤销   ⌘⇧Z 重做   ⌘S 保存   ↩ 复制   ⌘P 置顶   Esc 取消"
     static let captureCaption = "截图"
-    static let captureTooLarge = "这张图超过 8 MB，没有写入历史"
-    static let captureRenderFailed = "标注渲染失败，请重试"
-    static let captureFailed = "没有截到屏幕"
-    static let captureSaved = "已保存"
-    static let captureSaveFailed = "没有保存成功"
 }

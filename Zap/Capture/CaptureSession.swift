@@ -470,7 +470,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
             try data.write(to: url, options: .atomic)
             finish(.saved)
         } catch {
-            showToast(L10n.captureSaveFailed)
+            logger.error("Saving capture failed: \(String(describing: error), privacy: .public)")
         }
     }
 
@@ -486,7 +486,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
         guard let crop, let selection, let displayID = activeDisplay,
               let shot = shots.first(where: { $0.displayID == displayID }) else { return nil }
         guard let rendered = CaptureRenderer.render(base: crop, marks: marks) else {
-            showToast(L10n.captureRenderFailed)
+            logger.error("Capture rendering failed")
             return nil
         }
         let pointSize = NSSize(width: max(selection.width, 1), height: max(selection.height, 1))
@@ -501,14 +501,8 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
 
     private func pngData(_ image: CGImage) -> Data? {
         let data = CaptureRenderer.pngData(from: image)
-        if data == nil { showToast(L10n.captureFailed) }
+        if data == nil { logger.error("Capture PNG encoding failed") }
         return data
-    }
-
-    private func showToast(_ message: String) {
-        MainActor.assumeIsolated {
-            ToastCenter.shared.show(message)
-        }
     }
 
     private static func defaultFileName() -> String {
