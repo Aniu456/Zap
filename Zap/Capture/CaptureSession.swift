@@ -9,12 +9,15 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
     enum Outcome {
         case copied(Data)
         case colorCopied
+        case saved
         case pinned(NSImage, NSRect)
     }
 
     let loupe = PixelLoupe()
     private let shots: [ScreenGrabber.Shot]
     private let onFinish: (Outcome?) -> Void
+    private let chooseSaveURL: (String) -> URL?
+    private var isSaving = false
     private var windowGroup: CaptureWindowGroup?
     private var windows: [CGDirectDisplayID: CaptureWindow] { windowGroup?.windows ?? [:] }
     private var views: [CGDirectDisplayID: CaptureOverlayView] { windowGroup?.views ?? [:] }
@@ -30,6 +33,8 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
     private var draft: CaptureMark?
     private var tool: CaptureTool = .arrow
     private var textField: NSTextField?
+    private var textEditor: CaptureTextEditor?
+    private var movingText: (index: Int, before: [CaptureMark])?
     private var toolbar: CaptureToolbar?
     private var finished = false
     private let logger = Logger(subsystem: "com.aniu456.Zap", category: "Capture")
@@ -40,9 +45,11 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
         case editing
     }
 
-    init(shots: [ScreenGrabber.Shot], onFinish: @escaping (Outcome?) -> Void) {
+    init(shots: [ScreenGrabber.Shot], chooseSaveURL: ((String) -> URL?)? = nil,
+         onFinish: @escaping (Outcome?) -> Void) {
         self.shots = shots
         self.onFinish = onFinish
+        self.chooseSaveURL = chooseSaveURL ?? Self.presentSavePanel
     }
 
     func begin() {
@@ -93,6 +100,12 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
         case .editing:
             guard displayID == activeDisplay, let selection, selection.contains(point) else { return }
             if tool == .text {
+                if let index = textMark(at: point) {
+                    dragStart = point
+                    movingText = (index, marks)
+                    loupe.hide()
+                    return
+                }
                 presentTextField(at: point)
                 return
             }
@@ -116,6 +129,10 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
             selection = rect(from: dragStart, to: local, displayID: activeDisplay)
             redraw()
         case .editing:
+            if movingText != nil {
+                moveText(to: local, from: dragStart)
+                return
+            }
             guard let selection, selection.contains(dragStart) else { return }
             if tool == .eraser {
                 erase(at: local)
@@ -146,6 +163,17 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
                 redraw()
             }
         case .editing:
+            if let movingText {
+                moveText(to: local, from: start)
+                if marks != movingText.before {
+                    undoStack.append(movingText.before)
+                    if undoStack.count > 40 { undoStack.removeFirst() }
+                    redoStack.removeAll()
+                }
+                self.movingText = nil
+                redraw()
+                return
+            }
             if tool == .eraser {
                 eraserSnapshotTaken = false
                 self.dragStart = nil
@@ -174,7 +202,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
     }
 
     func updateLoupe(in view: CaptureOverlayView, point: CGPoint) {
-        guard !finished, textField == nil, view.hitTest(point) === view,
+        guard !finished, textField == nil, movingText == nil, view.hitTest(point) === view,
               let shot = shots.first(where: { $0.displayID == view.displayID }) else {
             loupe.hide()
             return
@@ -193,7 +221,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
             cancel(reason: "escape")
             return
         }
-        guard phase == .editing else { return }
+        guard phase == .editing, movingText == nil else { return }
         if modifiers.contains(.command), event.charactersIgnoringModifiers?.lowercased() == "z", !modifiers.contains(.shift) {
             undo()
             return
@@ -337,20 +365,43 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
         self.toolbar = toolbar
     }
 
+    private func textBounds(_ mark: CaptureMark) -> CGRect? {
+        guard case .text(let string, let origin, let fontSize) = mark,
+              let selection, let crop else { return nil }
+        let imageSize = CGSize(width: crop.width, height: crop.height)
+        let topLeft = CaptureGeometry.viewPoint(fromCropPixel: origin, selection: selection, imageSize: imageSize)
+        let font = NSFont.systemFont(ofSize: max(12, fontSize * selection.height / imageSize.height), weight: .semibold)
+        let size = (string as NSString).size(withAttributes: [.font: font])
+        return CGRect(x: topLeft.x, y: topLeft.y - font.ascender, width: size.width, height: size.height)
+    }
+
+    private func textMark(at point: CGPoint) -> Int? {
+        marks.indices.reversed().first { index in
+            textBounds(marks[index])?.insetBy(dx: -4, dy: -4).contains(point) == true
+        }
+    }
+
+    private func moveText(to point: CGPoint, from start: CGPoint) {
+        guard let movingText, let selection, let crop,
+              case .text(let string, let origin, let fontSize) = movingText.before[movingText.index],
+              let bounds = textBounds(movingText.before[movingText.index]) else { return }
+        let x = min(max(bounds.minX + point.x - start.x, selection.minX), max(selection.minX, selection.maxX - bounds.width))
+        let y = min(max(bounds.minY + point.y - start.y, selection.minY), max(selection.minY, selection.maxY - bounds.height))
+        let moved = CGPoint(x: origin.x + (x - bounds.minX) * CGFloat(crop.width) / selection.width,
+                            y: origin.y - (y - bounds.minY) * CGFloat(crop.height) / selection.height)
+        marks[movingText.index] = .text(string, origin: moved, fontSize: fontSize)
+        redraw()
+    }
+
     private func presentTextField(at point: CGPoint) {
         guard let displayID = activeDisplay, let view = views[displayID], let selection else { return }
         commitText()
-        var width = min(220, selection.maxX - point.x)
-        var originX = point.x
-        if width < 80 {
-            width = min(220, selection.width)
-            originX = max(selection.minX, selection.maxX - width)
-        }
-        var frame = NSRect(x: originX, y: point.y - 28, width: width, height: 28)
-        if frame.minY < selection.minY {
-            frame.origin.y = min(selection.maxY - frame.height, max(selection.minY, point.y))
-        }
-        let field = NSTextField(frame: frame)
+        let size = CGSize(width: min(240, selection.width), height: min(28, selection.height))
+        let frame = CGRect(x: min(max(selection.minX, point.x), selection.maxX - size.width),
+                           y: min(max(selection.minY, point.y - size.height), selection.maxY - size.height),
+                           width: size.width, height: size.height)
+        let editor = CaptureTextEditor(frame: frame, movementBounds: selection)
+        let field = editor.field
         field.isBezeled = true
         field.bezelStyle = .roundedBezel
         field.font = NSFont.systemFont(ofSize: 18, weight: .semibold)
@@ -358,7 +409,8 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
         field.backgroundColor = NSColor.white.withAlphaComponent(0.94)
         field.focusRingType = .none
         field.delegate = self
-        view.addSubview(field)
+        view.addSubview(editor)
+        textEditor = editor
         textField = field
         windows[displayID]?.makeFirstResponder(field)
     }
@@ -368,8 +420,9 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
         textField = nil
         field.delegate = nil
         let string = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let topLeft = CGPoint(x: field.frame.minX, y: field.frame.maxY)
-        field.removeFromSuperview()
+        let topLeft = field.convert(CGPoint(x: field.bounds.minX, y: field.bounds.maxY), to: textEditor?.superview)
+        textEditor?.removeFromSuperview()
+        textEditor = nil
         if !string.isEmpty, let selection, let crop {
             let imageSize = CGSize(width: crop.width, height: crop.height)
             let origin = CaptureGeometry.cropPixel(fromViewPoint: topLeft, selection: selection, imageSize: imageSize)
@@ -385,7 +438,8 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
         guard let field = textField else { return }
         textField = nil
         field.delegate = nil
-        field.removeFromSuperview()
+        textEditor?.removeFromSuperview()
+        textEditor = nil
         makeOverlayFirstResponder()
     }
 
@@ -399,27 +453,33 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
     }
 
     private func saveToFile() {
-        guard let rendered = exportRender() else { return }
+        guard !finished, !isSaving, let rendered = exportRender() else { return }
+        isSaving = true
+        defer { isSaving = false }
         let previousLevels = windows.mapValues(\.level)
         for window in windows.values {
             window.level = .floating
         }
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.png]
-        panel.canCreateDirectories = true
-        panel.nameFieldStringValue = Self.defaultFileName()
-        let response = panel.runModal()
+        let url = chooseSaveURL(Self.defaultFileName())
         for (displayID, window) in windows {
             window.level = previousLevels[displayID] ?? .screenSaver
         }
-        guard response == .OK, let url = panel.url else { return }
+        guard !finished, let url else { return }
         do {
             guard let data = pngData(rendered.image) else { return }
-            try data.write(to: url)
-            showToast(L10n.captureSaved)
+            try data.write(to: url, options: .atomic)
+            finish(.saved)
         } catch {
             showToast(L10n.captureSaveFailed)
         }
+    }
+
+    private static func presentSavePanel(fileName: String) -> URL? {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.png]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = fileName
+        return panel.runModal() == .OK ? panel.url : nil
     }
 
     private func exportRender() -> (image: CGImage, screenFrame: NSRect)? {
@@ -650,6 +710,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
         switch outcome {
         case .copied: result = "copied"
         case .colorCopied: result = "color copied"
+        case .saved: result = "saved"
         case .pinned: result = "pinned"
         case nil: result = "cancelled"
         }
@@ -657,6 +718,8 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
         loupe.hide()
         textField?.delegate = nil
         textField = nil
+        textEditor = nil
+        movingText = nil
         toolbar = nil
         windowGroup?.close()
         windowGroup = nil
