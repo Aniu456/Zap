@@ -6,11 +6,21 @@ import OSLog
 /// Selection and editing model; window ownership belongs to CaptureWindowGroup.
 @MainActor
 final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
+    struct PinSnapshot {
+        let image: NSImage
+        let base: CGImage
+        let marks: [CaptureMark]
+        let undo: [[CaptureMark]]
+        let redo: [[CaptureMark]]
+    }
+
+    private(set) var exportedPin: PinSnapshot?
+
     enum Outcome {
         case copied(Data)
         case colorCopied
         case saved
-        case pinned(NSImage, NSRect)
+        case pinned(PinSnapshot, NSRect)
     }
 
     let loupe = PixelLoupe()
@@ -19,8 +29,15 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
     private let chooseSaveURL: (String) -> URL?
     private var isSaving = false
     private var windowGroup: CaptureWindowGroup?
-    private var windows: [CGDirectDisplayID: CaptureWindow] { windowGroup?.windows ?? [:] }
-    private var views: [CGDirectDisplayID: CaptureOverlayView] { windowGroup?.views ?? [:] }
+    private weak var pinCanvas: CaptureOverlayView?
+    private var windows: [CGDirectDisplayID: NSWindow] {
+        if let pinCanvas, let window = pinCanvas.window { return [pinCanvas.displayID: window] }
+        return windowGroup?.windows ?? [:]
+    }
+    private var views: [CGDirectDisplayID: CaptureOverlayView] {
+        if let pinCanvas { return [pinCanvas.displayID: pinCanvas] }
+        return windowGroup?.views ?? [:]
+    }
     private var phase: Phase = .selecting
     private var activeDisplay: CGDirectDisplayID?
     private var dragStart: CGPoint?
@@ -31,7 +48,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
     private var undoStack: [[CaptureMark]] = []
     private var redoStack: [[CaptureMark]] = []
     private var draft: CaptureMark?
-    private var tool: CaptureTool = .arrow
+    private(set) var tool: CaptureTool = .arrow
     private var textField: NSTextField?
     private var textEditor: CaptureTextEditor?
     private var movingText: (index: Int, before: [CaptureMark])?
@@ -59,6 +76,25 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
         group.present { [weak self] event in self?.routeGlobal(event) }
     }
 
+    func editPin(_ snapshot: PinSnapshot, in window: NSWindow) {
+        guard let shot = shots.first else { return }
+        let view = CaptureOverlayView(displayID: shot.displayID)
+        view.session = self
+        window.contentView = view
+        pinCanvas = view
+        activeDisplay = shot.displayID
+        selection = view.bounds
+        crop = snapshot.base
+        phase = .editing
+        marks = snapshot.marks
+        undoStack = snapshot.undo
+        redoStack = snapshot.redo
+        refreshPreview()
+        redraw()
+        window.makeKeyAndOrderFront(nil)
+        makeOverlayFirstResponder()
+    }
+
     func cancel() { cancel(reason: "controller") }
 
     func cancel(reason: String) {
@@ -81,7 +117,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
             marks: isActive ? marks : [],
             draft: isActive ? draft : nil,
             cropSize: isActive ? crop.map { CGSize(width: $0.width, height: $0.height) } : nil,
-            hint: isActive || phase == .selecting ? hint : ""
+            hint: pinCanvas == nil && (isActive || phase == .selecting) ? hint : ""
         )
     }
 
@@ -202,7 +238,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
     }
 
     func updateLoupe(in view: CaptureOverlayView, point: CGPoint) {
-        guard !finished, textField == nil, movingText == nil, view.hitTest(point) === view,
+        guard pinCanvas == nil, !finished, textField == nil, movingText == nil, view.hitTest(point) === view,
               let shot = shots.first(where: { $0.displayID == view.displayID }) else {
             loupe.hide()
             return
@@ -246,7 +282,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
             commit(pin: false)
             return
         }
-        guard modifiers.isEmpty else { return }
+        guard modifiers.isEmpty, pinCanvas == nil else { return }
         switch Int(event.keyCode) {
         case kVK_ANSI_1: setTool(.arrow)
         case kVK_ANSI_2: setTool(.box)
@@ -279,13 +315,17 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
         phase == .selecting ? L10n.captureSelectHint : L10n.captureEditHint
     }
 
-    private func setTool(_ tool: CaptureTool) {
+    var canUndo: Bool { !undoStack.isEmpty }
+    var canRedo: Bool { !redoStack.isEmpty }
+
+    func setTool(_ tool: CaptureTool) {
+        commitText()
         self.tool = tool
         toolbar?.setTool(tool)
         makeOverlayFirstResponder()
     }
 
-    private func undo() {
+    func undo() {
         guard let previous = undoStack.popLast() else {
             NSSound.beep()
             return
@@ -297,7 +337,7 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
         redraw()
     }
 
-    private func redo() {
+    func redo() {
         guard let next = redoStack.popLast() else {
             NSSound.beep()
             return
@@ -443,16 +483,25 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
         makeOverlayFirstResponder()
     }
 
-    private func commit(pin: Bool) {
-        guard let rendered = exportRender() else { return }
+    func commit(pin: Bool) {
+        commitText()
+        guard let rendered = exportRender(), let crop else { return }
         if pin {
-            finish(.pinned(NSImage(cgImage: rendered.image, size: rendered.screenFrame.size), rendered.screenFrame))
+            finish(.pinned(pinSnapshot(rendered.image, size: rendered.screenFrame.size, base: crop), rendered.screenFrame))
         } else if let data = pngData(rendered.image) {
+            if pinCanvas != nil {
+                exportedPin = pinSnapshot(rendered.image, size: rendered.screenFrame.size, base: crop)
+            }
             finish(.copied(data))
         }
     }
 
-    private func saveToFile() {
+    private func pinSnapshot(_ image: CGImage, size: CGSize, base: CGImage) -> PinSnapshot {
+        PinSnapshot(image: NSImage(cgImage: image, size: size), base: base, marks: marks, undo: undoStack, redo: redoStack)
+    }
+
+    func saveToFile() {
+        commitText()
         guard !finished, !isSaving, let rendered = exportRender() else { return }
         isSaving = true
         defer { isSaving = false }
@@ -468,6 +517,9 @@ final class CaptureSession: NSObject, NSTextFieldDelegate, CapturePresenting {
         do {
             guard let data = pngData(rendered.image) else { return }
             try data.write(to: url, options: .atomic)
+            if pinCanvas != nil, let crop {
+                exportedPin = pinSnapshot(rendered.image, size: rendered.screenFrame.size, base: crop)
+            }
             finish(.saved)
         } catch {
             logger.error("Saving capture failed: \(String(describing: error), privacy: .public)")

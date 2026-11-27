@@ -52,8 +52,8 @@ final class CaptureController {
             restorePreviousApp()
         case .saved:
             restorePreviousApp()
-        case .pinned(let image, let screenFrame):
-            let pin = PinWindowController(image: image, screenFrame: screenFrame)
+        case .pinned(let snapshot, let screenFrame):
+            let pin = PinWindowController(snapshot: snapshot, screenFrame: screenFrame)
             pin.onClose = { [weak self, weak pin] in
                 guard let self, let pin else { return }
                 self.pins.removeAll { $0 === pin }

@@ -1,13 +1,19 @@
 import AppKit
 
 /// Main-thread pin window. Created from the capture controller after a shot is finished.
-final class PinWindowController: NSObject {
+@MainActor
+final class PinWindowController: NSObject, NSMenuDelegate {
     let window: PinWindow
     private let baseSize: NSSize
     private var scale: CGFloat = 1
     var onClose: (() -> Void)?
 
-    init(image: NSImage, screenFrame: NSRect) {
+    private var snapshot: CaptureSession.PinSnapshot
+    private var editor: CaptureSession?
+    private lazy var optionsMenu = makeMenu()
+
+    init(snapshot: CaptureSession.PinSnapshot, screenFrame: NSRect) {
+        self.snapshot = snapshot
         baseSize = screenFrame.size
         let window = PinWindow(
             contentRect: screenFrame,
@@ -24,19 +30,115 @@ final class PinWindowController: NSObject {
         window.backgroundColor = .clear
         window.hasShadow = true
         window.hidesOnDeactivate = false
-        window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
-        let view = PinContentView(image: image)
+        showPin()
+        window.setFrame(screenFrame, display: true)
+        window.orderFrontRegardless()
+    }
+
+    private func showPin() {
+        let view = PinContentView(image: snapshot.image)
+        view.menu = optionsMenu
+        window.isMovableByWindowBackground = true
         view.onClose = { [weak self] in self?.close() }
         window.acceptsMouseMovedEvents = true
         view.onScale = { [weak self] factor in self?.scale(by: factor) }
         view.onResetScale = { [weak self] in self?.scale(to: 1) }
         window.contentView = view
-        window.setFrame(screenFrame, display: true)
-        window.orderFrontRegardless()
     }
 
-    func close() {
+    private func edit() -> CaptureSession {
+        if let editor { return editor }
+        (window.contentView as? PinContentView)?.loupe.hide()
+        let shot = ScreenGrabber.Shot(displayID: 0, frame: window.frame, image: snapshot.base)
+        let session = CaptureSession(shots: [shot]) { [weak self] outcome in
+            guard let self else { return }
+            if let exported = self.editor?.exportedPin { self.snapshot = exported }
+            if case .pinned(let edited, _) = outcome {
+                self.snapshot = edited
+            } else if case .copied(let data) = outcome {
+                _ = ClipboardStore.shared.publishCapturedPNG(data, caption: L10n.captureCaption)
+            }
+            self.editor = nil
+            self.showPin()
+        }
+        editor = session
+        window.isMovableByWindowBackground = false
+        session.editPin(snapshot, in: window)
+        window.contentView?.menu = optionsMenu
+        return session
+    }
+
+    private func makeMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.delegate = self
+        func add(_ title: String, _ action: Selector) -> NSMenuItem {
+            let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
+            item.target = self
+            return item
+        }
+        _ = add("放大", #selector(zoomIn))
+        _ = add("缩小", #selector(zoomOut))
+        _ = add("恢复原始大小（100%）", #selector(resetZoom))
+        _ = add("取色器", #selector(pickColor))
+        menu.addItem(.separator())
+        let tools: [(String, CaptureTool)] = [
+            (L10n.toolBox, .box), (L10n.toolArrow, .arrow),
+            (L10n.toolText, .text), (L10n.toolMosaic, .mosaic)
+        ]
+        for (title, tool) in tools {
+            add(title, #selector(selectTool(_:))).representedObject = tool
+        }
+        _ = add("完成标注", #selector(finishEditing))
+        _ = add(L10n.undo, #selector(undoEdit))
+        _ = add(L10n.redo, #selector(redoEdit))
+        menu.addItem(.separator())
+        _ = add(L10n.copyCapture, #selector(copyPin))
+        _ = add(L10n.saveCapture, #selector(savePin))
+        _ = add(L10n.closePin, #selector(close))
+        return menu
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        for item in menu.items {
+            switch item.action {
+            case #selector(undoEdit): item.isEnabled = editor?.canUndo ?? !snapshot.undo.isEmpty
+            case #selector(redoEdit): item.isEnabled = editor?.canRedo ?? !snapshot.redo.isEmpty
+            case #selector(finishEditing): item.isHidden = editor == nil
+            case #selector(selectTool(_:)):
+                item.state = editor?.tool == (item.representedObject as? CaptureTool) ? .on : .off
+            case #selector(pickColor):
+                item.state = (window.contentView as? PinContentView)?.picking == true ? .on : .off
+            default: break
+            }
+        }
+    }
+
+    @objc private func selectTool(_ item: NSMenuItem) {
+        if let tool = item.representedObject as? CaptureTool { edit().setTool(tool) }
+    }
+
+    @objc private func finishEditing() { editor?.commit(pin: true) }
+    @objc private func undoEdit() { edit().undo() }
+    @objc private func redoEdit() { edit().redo() }
+    @objc private func copyPin() { edit().commit(pin: false) }
+    @objc private func savePin() {
+        let wasViewing = editor == nil
+        edit().saveToFile()
+        if wasViewing { editor?.cancel() }
+    }
+    @objc private func zoomIn() { finishEditing(); scale(by: 1.2) }
+    @objc private func zoomOut() { finishEditing(); scale(by: 1 / 1.2) }
+    @objc private func resetZoom() { finishEditing(); scale(to: 1) }
+
+    @objc private func pickColor() {
+        finishEditing()
+        (window.contentView as? PinContentView)?.togglePicker()
+    }
+
+    @objc func close() {
+        editor?.cancel()
         (window.contentView as? PinContentView)?.loupe.hide()
         window.orderOut(nil)
         window.contentView = nil
@@ -68,7 +170,7 @@ final class PinWindow: NSPanel {
 final class PinContentView: NSView {
     var onClose: (() -> Void)?
     let loupe = PixelLoupe()
-    private var picking = false
+    private(set) var picking = false
     private lazy var bitmap = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
     var onScale: ((CGFloat) -> Void)?
     var onResetScale: (() -> Void)?
@@ -93,23 +195,6 @@ final class PinContentView: NSView {
         closeButton.frame = NSRect(x: 0, y: 0, width: 22, height: 22)
         addSubview(closeButton)
         toolTip = "滚轮或双指捏合缩放 · 拖动移动 · 右键查看更多操作"
-        menu = NSMenu()
-        for (title, action) in [
-            ("放大", #selector(zoomIn)),
-            ("缩小", #selector(zoomOut)),
-            ("恢复原始大小（100%）", #selector(resetZoom))
-        ] {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-            item.target = self
-            menu?.addItem(item)
-        }
-        menu?.addItem(.separator())
-        let picker = NSMenuItem(title: "取色器", action: #selector(togglePicker(_:)), keyEquivalent: "")
-        picker.target = self
-        menu?.addItem(picker)
-        let item = NSMenuItem(title: L10n.closePin, action: #selector(close), keyEquivalent: "")
-        item.target = self
-        menu?.addItem(item)
     }
 
     @available(*, unavailable)
@@ -165,6 +250,10 @@ final class PinContentView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.control) {
+            super.rightMouseDown(with: event)
+            return
+        }
         window?.makeKey()
         window?.makeFirstResponder(self)
         if event.clickCount == 2 {
@@ -210,9 +299,8 @@ final class PinContentView: NSView {
         super.keyDown(with: event)
     }
 
-    @objc private func togglePicker(_ item: NSMenuItem) {
+    func togglePicker() {
         picking.toggle()
-        item.state = picking ? .on : .off
         if picking {
             window?.makeKey()
             window?.makeFirstResponder(self)
